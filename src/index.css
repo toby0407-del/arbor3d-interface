@@ -566,6 +566,24 @@ h1 { margin: 0; font-size: 32px; font-weight: 650; letter-spacing: -0.03em; }
   text-align: center;
 }
 .evidence-empty small { display: block; font-size: 12px; word-break: break-all; }
+.scan-map {
+  margin: 0 0 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.scan-map figcaption {
+  padding: 10px 14px 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+.scan-map img {
+  width: 100%;
+  display: block;
+  background: #11140f;
+}
 .osm-inventory-wrap {
   display: grid;
   place-items: center;

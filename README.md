@@ -11,7 +11,7 @@
 2. **選點：** OpenStreetMap 上搜尋／點公園或學校，再點掃描路徑
 3. **（可選）錄製路徑：** 精度 ≤ 10 m 才開始記點，可下載 GPX
 4. **盤點：** 看路徑、樹位、綠黃紅燈；紅燈可填現場手測並匯出 CSV
-5. **待複核／詳情／3D**
+5. **待複核／詳情／3D**（詳情有真實照片、遮罩、剖面；3D 讀真實 `.ply`）
 
 地圖用 [Leaflet](https://leafletjs.com/) + [OpenStreetMap](https://www.openstreetmap.org/copyright)，不需 API key。
 
@@ -23,8 +23,14 @@
 | E-2041 | 陳雅婷 | arbor2041 |
 | E-3308 | 黃建宏 | arbor3308 |
 
-目前只有「臺中中央公園 → 水湳東側步道」接了示範 JSON（`src/data/inventories/20260812070325.json`）。  
-其他地點要接真實資料：見 [NEXT_STEPS.md](./NEXT_STEPS.md)。
+## 目前可驗證的實測資料
+
+- **臺中中央公園 → 水湳東側步道**（掃描 `20260812070325`，5 棵樹）
+- JSON：`src/data/inventories/20260812070325.json`
+- 媒體：`public/scans/20260812070325/`
+- Tree_002、Tree_004 為淡紅（待複核），不要當正式樹圍
+
+其他地點要接新掃描：見 [NEXT_STEPS.md](./NEXT_STEPS.md)。
 
 ## 燈號
 

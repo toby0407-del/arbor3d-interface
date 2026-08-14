@@ -1,8 +1,8 @@
-# Arbor3D 介面 — 未完成事項（給遠端／另一台機器讀）
+# Arbor3D 介面 — 進度與接資料說明
 
 > 倉庫：https://github.com/toby0407-del/arbor3d-interface  
 > 量測／演算法倉庫（Python）：https://github.com/toby0407-del/Arbor3D  
-> 這份文件說明：**介面已做到哪、遠端要把真實觀測資料怎麼放、還缺什麼。**
+> 這份文件說明：**介面已做到哪、真實觀測資料怎麼放、還缺什麼。**
 
 ---
 
@@ -16,18 +16,27 @@
 6. 觀測 JSON 綁地點：`src/data/inventories/{scan_id}.json` + `src/data/scanBindings.ts`
 7. 有盤點的地點：地圖黃點、列表「已盤點」；無資料不能進盤點
 8. 路徑總覽／待複核／詳情；現場手測可填、存 localStorage、匯出 CSV
-9. 照片／3D：沒檔就顯示「尚未匯入」（不再用假點雲假裝已接上）
+9. **真實媒體已接上主掃描**：照片、YOLO 遮罩、胸高剖面、演算法俯視圖
+10. **真實 3DGS `.ply` 點雲檢視**（Three.js；無檔時仍顯示「尚未匯入」）
 
-**目前唯一有盤點示範資料的路徑：**
+### 目前已接上的實測掃描
 
-- 公園：`臺中中央公園`
-- 路徑：`水湳東側步道`（`central-east`）
-- 掃描：`20260812070325`
-- JSON：`src/data/inventories/20260812070325.json`
+| 項目 | 內容 |
+|------|------|
+| 公園 | `臺中中央公園` |
+| 路徑 | `水湳東側步道`（`central-east`） |
+| 掃描 | `20260812070325` |
+| JSON | `src/data/inventories/20260812070325.json` |
+| 媒體 | `public/scans/20260812070325/{photos,masks,dbh,models,maps}/` |
+| 樹數 | 5 棵（Tree_001–005） |
+| 燈號 | 001／003／005 淡黃；**002／004 淡紅**（勿當正式樹圍） |
+| GPS | 此掃描無 GPS；樹位用相對座標放到示範 polyline |
+
+本機驗證路徑：登入 → 搜尋「中央公園」→ 選「水湳東側步道（已盤點）」→ 總覽看樹卡與俯視圖 → 詳情看照片／遮罩／剖面 → 開 3D。
 
 ---
 
-## 二、遠端電腦「把實際觀測資料接上」要做的事（優先）
+## 二、之後再接新掃描（遠端／另一台）
 
 ### 步驟 A — 放入掃描報告
 
@@ -37,78 +46,64 @@ Python 產出的 `park_inventory_report.json` 請複製並改名：
 arbor3d-interface/src/data/inventories/{scan_id}.json
 ```
 
-例如掃描編號是 `20260812070325`，檔名就是 `20260812070325.json`。  
-檔案內容的 `scan_id` 欄位要與檔名一致。
+檔案內容的 `scan_id` 欄位要與檔名一致。路徑欄位用**相對路徑**，例如：
+
+```json
+"Best_Photo": "photos/Tree_001.jpg",
+"Mask_Path": "masks/real_tree_mask_Tree_001.jpg",
+"Cross_Section_Image": "dbh/dbh_slice_top_down_Tree_001.png",
+"3D_Model_Path": "models/Tree_001_supersplat.ply"
+```
 
 ### 步驟 B — 綁到哪個公園／哪條路徑
 
-編輯：
-
-```text
-src/data/scanBindings.ts
-```
-
-在 `SCAN_BINDINGS` 陣列加一筆，例如：
+編輯 `src/data/scanBindings.ts`，在 `SCAN_BINDINGS` 加一筆：
 
 ```ts
 {
-  parkName: "臺中中央公園",   // 必須與 OSM 目錄裡的 name 完全相同
-  pathId: "central-east",     // 路徑唯一 id（英文代號即可）
-  pathName: "水湳東側步道",    // 畫面上顯示的名稱
-  scanId: "20260812070325",   // 對應 inventories 檔名
-  polyline: [                 // 路徑座標 [lat, lng]；可用現場錄的 GPX 轉進來
-    [24.18793, 120.65331],
-    // ...
-  ],
+  parkName: "臺中中央公園",   // 必須與 OSM 目錄 name 完全相同
+  pathId: "central-east",
+  pathName: "水湳東側步道",
+  scanId: "20260812070325",
+  polyline: [ /* [lat, lng] */ ],
 }
 ```
 
-重點：
-
-- `parkName` 要能在選點清單裡搜到（與 `taiwan_sites.json` 的 `name` 一致）
-- 同一公園可加多筆 path／scan；頂部可切換掃描（`scanIds`）
-
-### 步驟 C — 照片、遮罩、剖面、3D
-
-JSON 裡的相對路徑（例如 `photos/Tree_001.jpg`、`models/Tree_001_supersplat.ply`）請放到：
+### 步驟 C — 照片、遮罩、剖面、3D、俯視圖
 
 ```text
-arbor3d-interface/public/scans/{scan_id}/photos/...
-arbor3d-interface/public/scans/{scan_id}/masks/...
-arbor3d-interface/public/scans/{scan_id}/dbh/...
-arbor3d-interface/public/scans/{scan_id}/models/...
+public/scans/{scan_id}/photos/...
+public/scans/{scan_id}/masks/...
+public/scans/{scan_id}/dbh/...
+public/scans/{scan_id}/models/...
+public/scans/{scan_id}/maps/tree_id_map_dbh.png   # 可選，總覽會顯示
 ```
 
-對應程式：`src/lib/scanMedia.ts`  
-沒放檔時，詳情／3D 會顯示「尚未匯入」，這是預期行為。
+對應程式：`src/lib/scanMedia.ts`（組成 `/scans/{scanId}/{相對路徑}`）。
 
 ### 步驟 D — 本機驗證
 
 ```bash
-git clone https://github.com/toby0407-del/arbor3d-interface.git
-cd arbor3d-interface
+git pull
 npm install
 npm run dev
 ```
 
-登入示範帳號 → 搜尋公園名 → 選有「已盤點」的路徑 → 進入盤點，確認樹數、燈號、CSV、照片路徑。
-
 ---
 
-## 三、尚未做／建議下一台繼續做
-
-依優先順序：
+## 三、尚未做／建議下一輪
 
 | 優先 | 項目 | 說明 |
 |------|------|------|
-| P0 | 接真實掃描檔 | 依上面 A–C，把遠端產出接進 `inventories` + `scanBindings` + `public/scans` |
-| P0 | 實際步道路線 | 示範 polyline 是示意；應用現場 GPX／錄製軌跡取代，或從掃描 GPS 轉入（若有） |
-| P1 | 真 3D 載入 `.ply` | 現在只有「未匯入」空狀態；接上 Three.js／SuperSplat 讀真實 ply |
-| P1 | 多掃描同一路徑 | 綁定已支援多 `scanId`，需多份 JSON 與 UI 再測一輪 |
+| P0 | 實際步道路線 | 示範 polyline 仍是示意；應用現場 GPX／錄製軌跡取代 |
+| P1 | 多掃描同一路徑 | 綁定已支援多 `scanId`，需多份 JSON 再測 |
 | P1 | 正式帳號 API | 現在是寫死示範帳號；上線前拿掉畫面上印出的密碼 |
-| P2 | 手機版 UX | 戶外單手：大按鈕、地圖全螢幕、少並排 |
-| P2 | 離線包 | 公園常沒網；已下載的掃描可離線看 |
-| P2 | 手測同步後端 | 手測目前只存瀏覽器 localStorage，換機會不見 |
+| P2 | 手機版 UX | 戶外單手：大按鈕、地圖全螢幕 |
+| P2 | 離線包 | 公園常沒網 |
+| P2 | 手測同步後端 | 手測目前只存 localStorage |
+
+~~P0 接真實掃描檔~~（主掃描已完成）  
+~~P1 真 3D 載入 `.ply`~~（已用點雲方式讀 supersplat ply）
 
 ---
 
@@ -121,11 +116,11 @@ npm run dev
 | `src/data/scanBindings.ts` | 掃描 ↔ 公園／路徑綁定 |
 | `src/data/inventory.ts` | 自動載入 inventories |
 | `src/lib/scanMedia.ts` | `public/scans/{scan_id}/...` URL |
+| `src/lib/loadPly.ts` | 讀 binary PLY 給 3D 檢視 |
 | `src/hooks/usePathRecorder.ts` | GPS 錄製（起測門檻 10 m） |
 | `src/hooks/useFieldMeasures.ts` | 現場手測（localStorage） |
 | `src/lib/csv.ts` | 匯出 CSV |
-| `src/types.ts` | `ParkInventoryReport`／樹欄位型別 |
-| `src/data/park_inventory_report.sample.json` | 舊示範檔（正式請用 inventories） |
+| `public/scans/{scan_id}/` | 該次掃描的照片／遮罩／剖面／模型 |
 
 ---
 
@@ -144,12 +139,10 @@ npm run dev
 ## 六、給另一台／另一個 agent 的最短指令
 
 ```text
-1. Clone arbor3d-interface，npm install && npm run dev
-2. 讀 NEXT_STEPS.md 第二節
-3. 把 Python 產出的 park_inventory_report.json 放到 src/data/inventories/{scan_id}.json
-4. 編輯 src/data/scanBindings.ts 綁公園名與路徑 polyline
-5. 把照片／ply 放到 public/scans/{scan_id}/
-6. 重新 npm run dev，在選點頁確認出現「已盤點」並能進入總覽
+1. git pull；npm install && npm run dev
+2. 讀 NEXT_STEPS.md 第二節（若要接新掃描）
+3. 新掃描：inventories/{scan_id}.json + scanBindings.ts + public/scans/{scan_id}/
+4. 驗證：中央公園 → 水湳東側步道 → 詳情照片／3D 應有真實檔
 ```
 
-完成後請更新本檔「目前唯一有盤點示範資料」區塊，並 push。
+完成新掃描後，請更新本檔「目前已接上的實測掃描」區塊，並 push。

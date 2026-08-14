@@ -47,6 +47,14 @@ export function ParkOverview({ park, path, report, field, onOpenTree }: Props) {
         </div>
       </div>
 
+      <figure className="scan-map">
+        <figcaption>演算法俯視圖（樹號 + 胸徑）</figcaption>
+        <img
+          src={`/scans/${report.scan_id}/maps/tree_id_map_dbh.png`}
+          alt={`${report.scan_id} 樹木俯視圖`}
+        />
+      </figure>
+
       <div className="overview-grid">
         <section className="park-map">
           <div className="park-map-head">

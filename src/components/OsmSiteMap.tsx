@@ -152,7 +152,10 @@ export function OsmSiteMap({
     const map = mapRef.current;
     if (!map) return;
     applyTaiwanLock(map);
-    const taiwan = L.latLngBounds(TAIWAN_BOUNDS);
+    const taiwan = L.latLngBounds(
+      L.latLng(21.7, 118.0),
+      L.latLng(26.5, 122.3),
+    );
     if (!taiwan.contains(here)) {
       setLocateNote("你的位置不在台灣／離島範圍內，地圖只顯示台灣地區。");
       return;
@@ -365,7 +368,7 @@ export function OsmSiteMap({
     const here = userPosRef.current;
     if (here && area.pad(2).contains(here)) {
       // User is near the site: show both, stay within Taiwan.
-      const both = L.latLngBounds(area);
+      const both = L.latLngBounds(area.getSouthWest(), area.getNorthEast());
       both.extend(here);
       applyTaiwanLock(map);
       map.flyToBounds(both, padding);
