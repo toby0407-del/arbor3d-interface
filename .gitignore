@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Overpass raw dumps (keep compact catalog only)
+src/data/raw_taichung_parks.json
+src/data/raw_taichung_schools.json
+src/data/taichung_catalog_parks.json
+src/data/raw_taiwan_parks.json
+src/data/raw_taiwan_schools.json
+# Superseded by taiwan_sites.json
+src/data/taichung_sites.json

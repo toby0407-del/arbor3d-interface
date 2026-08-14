@@ -2,16 +2,27 @@ import type { TreeRecord } from "../types";
 import { EvidencePanel } from "../components/EvidencePanel";
 import { FieldMeasureSlot } from "../components/FieldMeasureSlot";
 import { StatusLight } from "../components/StatusLight";
+import type { FieldMeasure } from "../hooks/useFieldMeasures";
 import { formatConfidence, formatDbh, formatXyz, methodLabel } from "../lib/format";
 import { lightLabel, trafficLight } from "../lib/status";
 
 type Props = {
   tree: TreeRecord;
+  scanId: string;
+  field: FieldMeasure | undefined;
+  onFieldChange: (next: { dbhCm: string; note: string }) => void;
   onBack: () => void;
   onOpen3d: () => void;
 };
 
-export function TreeDetail({ tree, onBack, onOpen3d }: Props) {
+export function TreeDetail({
+  tree,
+  scanId,
+  field,
+  onFieldChange,
+  onBack,
+  onOpen3d,
+}: Props) {
   const light = trafficLight(tree.DBH_note);
 
   return (
@@ -28,11 +39,11 @@ export function TreeDetail({ tree, onBack, onOpen3d }: Props) {
       </div>
 
       <div className="detail-layout">
-        <EvidencePanel tree={tree} />
+        <EvidencePanel tree={tree} scanId={scanId} />
 
         <aside className="measure-panel">
           <div className={`dbh-hero is-${light}`}>
-            <span>胸徑 DBH</span>
+            <span>胸徑 DBH（演算法）</span>
             <strong>{formatDbh(tree.DBH_cm)}</strong>
             <em>{methodLabel(tree.DBH_method)}</em>
           </div>
@@ -72,7 +83,11 @@ export function TreeDetail({ tree, onBack, onOpen3d }: Props) {
             <p className="red-banner">這個數字不要當正式樹圍，請現場再量。</p>
           ) : null}
 
-          <FieldMeasureSlot />
+          <FieldMeasureSlot
+            dbhCm={field?.dbhCm ?? ""}
+            note={field?.note ?? ""}
+            onChange={onFieldChange}
+          />
 
           <button type="button" className="primary-btn" onClick={onOpen3d}>
             打開 3D 檢視

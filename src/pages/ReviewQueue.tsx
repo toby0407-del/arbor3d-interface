@@ -1,15 +1,24 @@
 import type { ParkInventoryReport } from "../types";
 import { FieldMeasureSlot } from "../components/FieldMeasureSlot";
 import { StatusLight } from "../components/StatusLight";
+import type { FieldMeasure } from "../hooks/useFieldMeasures";
+import { exportInventoryCsv } from "../lib/csv";
 import { formatDbh, methodLabel } from "../lib/format";
 import { isReviewTree, reviewReason } from "../lib/status";
 
 type Props = {
   report: ParkInventoryReport;
+  field: Record<string, FieldMeasure>;
+  onFieldChange: (treeId: string, next: { dbhCm: string; note: string }) => void;
   onOpenTree: (treeId: string) => void;
 };
 
-export function ReviewQueue({ report, onOpenTree }: Props) {
+export function ReviewQueue({
+  report,
+  field,
+  onFieldChange,
+  onOpenTree,
+}: Props) {
   const rows = report.trees.filter(isReviewTree);
 
   return (
@@ -22,6 +31,13 @@ export function ReviewQueue({ report, onOpenTree }: Props) {
             {rows.length} 棵需現場再量。淡紅燈數字僅供參考，不要寫進正式盤點。
           </p>
         </div>
+        <button
+          type="button"
+          className="ghost-btn"
+          onClick={() => exportInventoryCsv(report, field)}
+        >
+          匯出 CSV
+        </button>
       </div>
 
       {rows.length === 0 ? (
@@ -46,7 +62,12 @@ export function ReviewQueue({ report, onOpenTree }: Props) {
                 <small>{methodLabel(tree.DBH_method)}</small>
               </div>
               <p className="review-reason">{reviewReason(tree)}</p>
-              <FieldMeasureSlot compact />
+              <FieldMeasureSlot
+                compact
+                dbhCm={field[tree.Tree_ID]?.dbhCm ?? ""}
+                note={field[tree.Tree_ID]?.note ?? ""}
+                onChange={(next) => onFieldChange(tree.Tree_ID, next)}
+              />
               <button
                 type="button"
                 className="ghost-btn"

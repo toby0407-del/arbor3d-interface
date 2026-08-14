@@ -10,6 +10,9 @@ type Props = {
   park: ParkSite;
   path: ScanPath;
   report: ParkInventoryReport;
+  scanId: string;
+  scanIds: string[];
+  onScanChange: (scanId: string) => void;
   route: Route;
   onNavigate: (route: Route) => void;
   onChangeSite: () => void;
@@ -22,6 +25,9 @@ export function AppShell({
   park,
   path,
   report,
+  scanId,
+  scanIds,
+  onScanChange,
   route,
   onNavigate,
   onChangeSite,
@@ -64,6 +70,24 @@ export function AppShell({
             </strong>
           </button>
           <div className="meta-chip">
+            <span className="meta-kicker">掃描</span>
+            {scanIds.length > 1 ? (
+              <select
+                className="scan-select"
+                value={scanId}
+                onChange={(event) => onScanChange(event.target.value)}
+              >
+                {scanIds.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <strong>{scanId}</strong>
+            )}
+          </div>
+          <div className="meta-chip">
             <span className="meta-kicker">樹的數量</span>
             <strong>{report.num_trees}</strong>
           </div>
@@ -101,7 +125,8 @@ export function AppShell({
           })}
           <ColorLegend compact />
           <p className="nav-note">
-            示範資料。之後遠端 clone，把真實 `park_inventory_report.json` 接進來即可。
+            觀測檔來自 src/data/inventories/{"{scan_id}"}.json。照片與 ply 放到
+            public/scans/{"{scan_id}"}。
           </p>
         </nav>
         <main className="main-pane">{children}</main>

@@ -12,10 +12,11 @@ const SuperSplatViewer = lazy(() =>
 
 type Props = {
   tree: TreeRecord;
+  scanId: string;
   onBack: () => void;
 };
 
-export function Tree3DView({ tree, onBack }: Props) {
+export function Tree3DView({ tree, scanId, onBack }: Props) {
   const light = trafficLight(tree.DBH_note);
 
   return (
@@ -32,7 +33,7 @@ export function Tree3DView({ tree, onBack }: Props) {
         </div>
       </div>
       <Suspense fallback={<div className="splat-stage splat-loading">載入 3D 檢視…</div>}>
-        <SuperSplatViewer tree={tree} />
+        <SuperSplatViewer tree={tree} scanId={scanId} />
       </Suspense>
     </div>
   );

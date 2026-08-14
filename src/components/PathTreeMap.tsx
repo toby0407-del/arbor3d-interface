@@ -5,6 +5,7 @@ import type { TreeRecord } from "../types";
 import { localToLatLng } from "../lib/geo";
 import { trafficLight } from "../lib/status";
 import { formatDbh } from "../lib/format";
+import { TAIWAN_BOUNDS, TAIWAN_MIN_ZOOM } from "../lib/mapBounds";
 
 type Props = {
   origin: [number, number];
@@ -27,9 +28,15 @@ export function PathTreeMap({ origin, path, trees, onSelect }: Props) {
 
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
-    const map = L.map(hostRef.current, { zoomControl: true }).setView(origin, 18);
+    const map = L.map(hostRef.current, {
+      zoomControl: true,
+      maxBounds: TAIWAN_BOUNDS,
+      maxBoundsViscosity: 1,
+      minZoom: TAIWAN_MIN_ZOOM,
+    }).setView(origin, 18);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
+      bounds: TAIWAN_BOUNDS,
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
     mapRef.current = map;
