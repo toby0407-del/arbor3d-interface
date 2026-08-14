@@ -10,44 +10,30 @@ export type ScanBinding = {
   polyline: LatLng[];
 };
 
-/** 把掃描綁到 OSM 公園。遠端新資料只要加一筆，並放入 inventories/{scanId}.json。 */
+/**
+ * 把掃描綁到 OSM 地點（公園或學校）。
+ * parkName 必須與 taiwan_sites.json 的 name 完全相同。
+ */
 export const SCAN_BINDINGS: ScanBinding[] = [
   {
-    parkName: "臺中中央公園",
-    pathId: "central-east",
-    pathName: "水湳東側步道",
+    parkName: "逢甲大學",
+    pathId: "fengchia-campus",
+    pathName: "校園掃描路徑",
     scanId: "20260812070325",
+    // 示意路線：沿樹位相對座標（大致朝南）擺在校區附近；有現場 GPX 後再換真軌跡
     polyline: [
-      [24.18793, 120.65331],
-      [24.18781, 120.65332],
-      [24.18762, 120.65333],
-      [24.18744, 120.65334],
-      [24.18725, 120.65333],
-      [24.18705, 120.65332],
+      [24.17995, 120.64838],
+      [24.17985, 120.6484],
+      [24.1797, 120.64842],
+      [24.17955, 120.64843],
+      [24.1794, 120.64842],
+      [24.17925, 120.6484],
     ],
   },
 ];
 
-const EMPTY_LAKE: ScanBinding = {
-  parkName: "臺中中央公園",
-  pathId: "central-lake",
-  pathName: "湖濱環狀步道",
-  scanId: "",
-  polyline: [
-    [24.18835, 120.6527],
-    [24.18855, 120.6531],
-    [24.1884, 120.65355],
-    [24.18805, 120.6535],
-    [24.18835, 120.6527],
-  ],
-};
-
 export function bindingsForPark(parkName: string): ScanBinding[] {
-  const bound = SCAN_BINDINGS.filter((item) => item.parkName === parkName);
-  if (parkName === "臺中中央公園") {
-    return [...bound, EMPTY_LAKE];
-  }
-  return bound;
+  return SCAN_BINDINGS.filter((item) => item.parkName === parkName);
 }
 
 export function bindingHasInventory(item: ScanBinding): boolean {
