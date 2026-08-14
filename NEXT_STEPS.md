@@ -61,9 +61,9 @@ arbor3d-interface/src/data/inventories/{scan_id}.json
 
 ```ts
 {
-  parkName: "臺中中央公園",   // 必須與 OSM 目錄 name 完全相同
-  pathId: "central-east",
-  pathName: "水湳東側步道",
+  parkName: "逢甲大學",        // 必須與 OSM 目錄 name 完全相同
+  pathId: "fengchia-campus",
+  pathName: "校園掃描路徑",
   scanId: "20260812070325",
   polyline: [ /* [lat, lng] */ ],
 }
