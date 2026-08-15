@@ -39,6 +39,8 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
 
   const filtered = useMemo(() => {
     const rows = searchSites(query, kind);
+    // 有搜尋字時保留相關度排序；空搜尋才依盤點／距離排
+    if (query.trim()) return rows;
     return [...rows].sort((a, b) => {
       const ia = siteHasInventory(a) ? 0 : 1;
       const ib = siteHasInventory(b) ? 0 : 1;
@@ -113,8 +115,7 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
           </div>
         </div>
         <p className="picker-hint">
-          全台灣據點：公園 {SITE_COUNTS.parks}、學校 {SITE_COUNTS.schools}（共{" "}
-          {SITE_COUNTS.total}，含澎湖／金門／馬祖）。可用縣市或名稱搜尋。
+          公園 {SITE_COUNTS.parks} · 學校 {SITE_COUNTS.schools}
         </p>
         <button type="button" className="ghost-btn" onClick={onLogout}>
           登出
@@ -123,17 +124,14 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
 
       <div className="picker-body">
         <aside className="picker-side">
-          <h1>這次是在哪裡拍的？</h1>
-          <p className="lede">
-            資料來自 OpenStreetMap，涵蓋全台灣公園與學校。先搜尋縣市或名稱，再選地點；也可現場錄製路線。
-          </p>
+          <h1>選拍攝地點</h1>
 
           <label className="search-field">
-            關鍵字搜尋
+            搜尋
             <input
               type="search"
               value={query}
-              placeholder="例如：台中 國小、台北 大安、高雄 中央公園"
+              placeholder="縣市＋名稱可連打，例如：台中惠來、逢甲"
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
@@ -159,12 +157,9 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
             ))}
           </div>
 
-          <p className="search-meta">
-            找到 {filtered.length} 筆。有盤點的地點會排在最前
-            {userPos ? "，其餘依離你的距離排序。" : "。定位後其餘會依距離排序。"}
-          </p>
+          <p className="search-meta">{filtered.length} 筆</p>
 
-          <h2>地點列表</h2>
+          <h2>地點</h2>
           <ul className="picker-list is-scroll">
             {filtered.slice(0, 200).map((item) => (
               <li key={item.id}>
@@ -200,15 +195,15 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
             ))}
           </ul>
           {filtered.length > 200 ? (
-            <p className="empty">只顯示前 200 筆，請再輸入更精確的關鍵字。</p>
+            <p className="empty">僅顯示前 200 筆</p>
           ) : null}
           {filtered.length === 0 ? (
-            <p className="empty">沒有符合的地點，換個關鍵字試試。</p>
+            <p className="empty">沒有符合的地點</p>
           ) : null}
 
           {park ? (
             <>
-              <h2>{park.name}的路徑</h2>
+              <h2>路徑</h2>
               <ul className="picker-list">
                 {park.paths.map((item) => (
                   <li key={item.id}>
@@ -221,28 +216,24 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
                       <span>
                         {item.hasInventory
                           ? `掃描 ${item.scanId}`
-                          : "尚無盤點資料"}
+                          : "尚無盤點"}
                       </span>
                     </button>
                   </li>
                 ))}
               </ul>
             </>
-          ) : (
-            <p className="empty">還沒選地點。</p>
-          )}
+          ) : null}
 
           <section className="record-panel">
-            <h2>現場錄製路徑</h2>
+            <h2>錄製路徑</h2>
             <p className="record-help">
-              按開始後允許定位。精度達到 {START_ACCURACY_M}{" "}
-              公尺以內才開始記點；請到室外、打開手機精準定位。停止後可下載
-              GPX，或勾選用這條線當盤點路徑。
+              室外定位，精度 ≤ {START_ACCURACY_M} m 才開始記點。
             </p>
             <div className="record-actions">
               {recorder.recording ? (
                 <button type="button" className="danger-btn" onClick={recorder.stop}>
-                  停止記錄
+                  停止
                 </button>
               ) : (
                 <button
@@ -251,7 +242,7 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
                   style={{ marginTop: 0 }}
                   onClick={() => {
                     if (!parkId) {
-                      setNotice("請先選一個地點，再開始記錄。");
+                      setNotice("請先選地點。");
                       return;
                     }
                     setNotice("");
@@ -290,13 +281,13 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
             <p className="record-status">
               {recorder.recording
                 ? recorder.locked
-                  ? "記錄中…"
-                  : `等待精度 ≤ ${START_ACCURACY_M} m 才開始測…`
+                  ? "記錄中"
+                  : `等待 ≤ ${START_ACCURACY_M} m`
                 : "未記錄"}
               {" · "}
-              {recorder.points.length} 個點
+              {recorder.points.length} 點
               {recorder.lastAccuracy != null
-                ? ` · 目前約 ${Math.round(recorder.lastAccuracy)} m`
+                ? ` · ${Math.round(recorder.lastAccuracy)} m`
                 : ""}
             </p>
             {hasRecordedTrack ? (
@@ -306,7 +297,7 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
                   checked={useRecorded}
                   onChange={(event) => setUseRecorded(event.target.checked)}
                 />
-                進入盤點時，用地圖上這條錄製路線（不要用示範線）
+                用錄製路線進入盤點
               </label>
             ) : null}
             {recorder.error ? <p className="login-error">{recorder.error}</p> : null}
@@ -315,12 +306,7 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
           {notice ? <p className="login-error">{notice}</p> : null}
 
           {park && path && !path.hasInventory ? (
-            <p className="empty">
-              這次掃描還沒匯入。可先錄製並下載 GPX；遠端把{" "}
-              <code>park_inventory_report.json</code> 放到{" "}
-              <code>src/data/inventories/掃描編號.json</code> 並在{" "}
-              <code>scanBindings.ts</code> 綁這個公園後，就能進入盤點。
-            </p>
+            <p className="empty">此路徑尚無盤點資料，可先錄 GPX。</p>
           ) : null}
 
           <button
@@ -329,9 +315,7 @@ export function SitePickerPage({ session, onLogout, onEnterPath }: Props) {
             disabled={!path?.hasInventory || recorder.recording}
             onClick={enter}
           >
-            {path && !path.hasInventory
-              ? "這次掃描還沒匯入，無法進入盤點"
-              : "進入這條路徑的盤點"}
+            {path && !path.hasInventory ? "尚無盤點資料" : "進入盤點"}
           </button>
 
           <ColorLegend compact />

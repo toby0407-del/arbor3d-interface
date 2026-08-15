@@ -76,6 +76,17 @@ const CITY_ALIASES: Array<[string, string[]]> = [
   ["連江", ["馬祖", "matsu"]],
 ];
 
+/** 由長到短，方便從「台中惠來」剝出縣市 */
+const CITY_FORMS: Array<{ canonical: string; forms: string[] }> = CITY_ALIASES.map(
+  ([city, aliases]) => {
+    const canonical = foldSearch(city);
+    const forms = [canonical, ...aliases.map(foldSearch)].sort(
+      (a, b) => b.length - a.length,
+    );
+    return { canonical, forms };
+  },
+).sort((a, b) => b.canonical.length - a.canonical.length);
+
 const QUERY_SYNONYMS: Record<string, string[]> = {
   國小: ["國小", "國民小學", "小學"],
   小學: ["國小", "國民小學", "小學"],
@@ -91,8 +102,10 @@ const QUERY_SYNONYMS: Record<string, string[]> = {
 function cityAliasBlob(text: string): string {
   const folded = foldSearch(text);
   const extras: string[] = [];
-  for (const [city, aliases] of CITY_ALIASES) {
-    if (folded.includes(foldSearch(city))) extras.push(...aliases);
+  for (const { canonical, forms } of CITY_FORMS) {
+    if (forms.some((form) => folded.includes(form))) {
+      extras.push(canonical, ...forms);
+    }
   }
   return extras.join(" ");
 }
@@ -101,6 +114,65 @@ function tokenVariants(token: string): string[] {
   const folded = foldSearch(token);
   const syn = QUERY_SYNONYMS[folded];
   return syn ? syn.map(foldSearch) : [folded];
+}
+
+/**
+ * 把「台中惠來」「臺中市 惠來公園」拆成可分別比對的關鍵字。
+ * 空白、縣市名、行政區後綴都會切開。
+ */
+export function tokenizeQuery(query: string): string[] {
+  let q = foldSearch(query.trim());
+  if (!q) return [];
+
+  // 行政區：西屯區、北區…
+  q = q.replace(/([\u4e00-\u9fff]{1,4}[縣市])([\u4e00-\u9fff]{1,4}[鄉鎮市區])/g, "$1 $2 ");
+  q = q.replace(/([\u4e00-\u9fff]{1,4}[鄉鎮市區])/g, " $1 ");
+
+  const tokens: string[] = [];
+
+  for (let part of q.split(/\s+/)) {
+    if (!part) continue;
+    let rest = part;
+    for (const { canonical, forms } of CITY_FORMS) {
+      const hit = forms.find((form) => rest.includes(form));
+      if (!hit) continue;
+      tokens.push(canonical);
+      rest = rest.split(hit).join("");
+      // 「臺中市惠來」剝完縣市後可能剩「市惠來」
+      rest = rest.replace(/^(市|縣)/, "");
+      break;
+    }
+    rest = rest.trim();
+    if (rest) tokens.push(rest);
+  }
+
+  // 去重、去掉太短無意義的單字（保留數字／英文）
+  const uniq: string[] = [];
+  for (const token of tokens) {
+    if (!token) continue;
+    if (token.length < 2 && !/[a-z0-9]/i.test(token)) continue;
+    if (!uniq.includes(token)) uniq.push(token);
+  }
+  return uniq;
+}
+
+function indexMatchesToken(index: string, token: string): boolean {
+  return tokenVariants(token).some((variant) => index.includes(variant));
+}
+
+function scoreSite(site: ParkSite, tokens: string[]): number {
+  const name = foldSearch(site.name);
+  const district = foldSearch(site.district);
+  let score = 0;
+  for (const token of tokens) {
+    const variants = tokenVariants(token);
+    if (variants.some((v) => name === v)) score += 50;
+    else if (variants.some((v) => name.includes(v))) score += 20;
+    else if (variants.some((v) => district.includes(v))) score += 8;
+    else score += 2;
+  }
+  if (siteHasInventory(site)) score += 5;
+  return score;
 }
 
 function toSite(item: CatalogItem): ParkSite {
@@ -168,12 +240,14 @@ export function searchSites(
   query: string,
   kind: "all" | SiteKind = "all",
 ): ParkSite[] {
-  const q = query.trim();
-  return PARKS.filter((site) => {
+  const tokens = tokenizeQuery(query);
+  const matched = PARKS.filter((site) => {
     if (kind !== "all" && site.kind !== kind) return false;
-    if (!q) return true;
-    return q.split(/\s+/).every((token) =>
-      tokenVariants(token).some((variant) => site.searchIndex.includes(variant)),
-    );
+    if (tokens.length === 0) return true;
+    // 每個關鍵字都要命中（台中 + 惠來 → 臺中市的惠來公園）
+    return tokens.every((token) => indexMatchesToken(site.searchIndex, token));
   });
+
+  if (tokens.length === 0) return matched;
+  return matched.sort((a, b) => scoreSite(b, tokens) - scoreSite(a, tokens));
 }

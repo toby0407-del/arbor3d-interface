@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import type { ScanPath } from "../data/sites";
 import type { TreeRecord } from "../types";
@@ -6,6 +6,11 @@ import { localToLatLng } from "../lib/geo";
 import { trafficLight } from "../lib/status";
 import { formatDbh } from "../lib/format";
 import { TAIWAN_BOUNDS, TAIWAN_MIN_ZOOM } from "../lib/mapBounds";
+import {
+  addTaiwanBasemap,
+  enableCursorCenteredZoom,
+  type TaiwanBasemapMode,
+} from "../lib/mapTiles";
 
 type Props = {
   origin: [number, number];
@@ -23,6 +28,8 @@ const FILL: Record<string, string> = {
 export function PathTreeMap({ origin, path, trees, onSelect }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const basemapRef = useRef<ReturnType<typeof addTaiwanBasemap> | null>(null);
+  const [basemapMode, setBasemapMode] = useState<TaiwanBasemapMode>("street");
   const selectRef = useRef(onSelect);
   selectRef.current = onSelect;
 
@@ -30,23 +37,27 @@ export function PathTreeMap({ origin, path, trees, onSelect }: Props) {
     if (!hostRef.current || mapRef.current) return;
     const map = L.map(hostRef.current, {
       zoomControl: true,
+      scrollWheelZoom: true,
+      doubleClickZoom: true,
       maxBounds: TAIWAN_BOUNDS,
       maxBoundsViscosity: 1,
       minZoom: TAIWAN_MIN_ZOOM,
     }).setView(origin, 18);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      bounds: TAIWAN_BOUNDS,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+    basemapRef.current = addTaiwanBasemap(map, TAIWAN_BOUNDS, "street");
+    enableCursorCenteredZoom(map);
     mapRef.current = map;
     const timer = window.setTimeout(() => map.invalidateSize(), 80);
     return () => {
       window.clearTimeout(timer);
       map.remove();
       mapRef.current = null;
+      basemapRef.current = null;
     };
   }, [origin]);
+
+  useEffect(() => {
+    basemapRef.current?.setMode(basemapMode);
+  }, [basemapMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -82,5 +93,27 @@ export function PathTreeMap({ origin, path, trees, onSelect }: Props) {
     };
   }, [origin, path, trees]);
 
-  return <div ref={hostRef} className="osm-canvas is-inset" />;
+  return (
+    <div
+      className={`osm-wrap is-inset ${basemapMode === "photo" ? "is-photo" : "is-street"}`}
+    >
+      <div ref={hostRef} className="osm-canvas is-inset" />
+      <div className="osm-basemap-switch" role="group" aria-label="底圖">
+        <button
+          type="button"
+          className={basemapMode === "street" ? "is-on" : undefined}
+          onClick={() => setBasemapMode("street")}
+        >
+          街道
+        </button>
+        <button
+          type="button"
+          className={basemapMode === "photo" ? "is-on" : undefined}
+          onClick={() => setBasemapMode("photo")}
+        >
+          空拍
+        </button>
+      </div>
+    </div>
+  );
 }

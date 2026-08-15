@@ -1,13 +1,25 @@
 import type { LatLngBoundsExpression } from "leaflet";
 
-/** 台灣本島 + 澎湖／金門／馬祖（不含全世界，減少圖磚量） */
+/**
+ * 可拖曳外圍：東西向再拓約 1.5 倍。
+ * 搭配 maxBoundsViscosity=1，邊緣釘死，不會滑出露出底色。
+ */
 export const TAIWAN_BOUNDS: LatLngBoundsExpression = [
-  [21.7, 118.0], // 西南：屏東外海～金門西側
-  [26.5, 122.3], // 東北：馬祖北側～宜蘭外海
+  [19.0, 114.8],
+  [29.0, 127.9],
 ];
 
-/** 整塊台灣可見時的最小縮放，避免拉太遠載入海外圖磚 */
-export const TAIWAN_MIN_ZOOM = 7;
+/** 初始畫面：台灣本島置中 */
+export const MAIN_ISLAND_BOUNDS: LatLngBoundsExpression = [
+  [21.5, 119.6],
+  [25.6, 122.4],
+];
 
-/** 定位成功後，以使用者為中心顯示約 100 公里範圍（邊長） */
-export const USER_VIEW_METERS = 100_000;
+export const TAIWAN_CENTER: [number, number] = [23.7, 121.0];
+
+export const TAIWAN_DEFAULT_ZOOM = 7;
+
+export const TAIWAN_MIN_ZOOM = 6;
+
+/** 手動按「定位」／初次飛到使用者時的視野邊長（公尺） */
+export const USER_VIEW_METERS = 8_000;
