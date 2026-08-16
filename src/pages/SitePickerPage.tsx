@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { BrandMark } from "../components/BrandMark";
 import { ColorLegend } from "../components/ColorLegend";
 import { OsmSiteMap } from "../components/OsmSiteMap";
 import {
@@ -174,14 +175,7 @@ export function SitePickerPage({ session, onLogout }: Props) {
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" width="28" height="28">
-              <circle cx="16" cy="16" r="15" fill="#2f4635" />
-              <path
-                d="M16 7.5c-3.2 3.2-5.4 6.4-5.4 9.4 0 3 2.4 5.1 5.4 5.1s5.4-2.1 5.4-5.1c0-3-2.2-6.2-5.4-9.4Z"
-                fill="#dcead9"
-              />
-              <rect x="14.6" y="20.2" width="2.8" height="5.2" rx="1" fill="#efe8d8" />
-            </svg>
+            <BrandMark size={28} />
           </span>
           <div>
             <div className="brand-name">Arbor3D 後台</div>
