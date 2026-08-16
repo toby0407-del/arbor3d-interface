@@ -30,4 +30,10 @@ export function writeSession(staff: StaffAccount): Session {
 
 export function clearSession(): void {
   sessionStorage.removeItem(KEY);
+  try {
+    sessionStorage.removeItem("arbor3d.mapView");
+    sessionStorage.removeItem("arbor3d.mapOverlays");
+  } catch {
+    /* ignore */
+  }
 }

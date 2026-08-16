@@ -94,6 +94,7 @@ export function enableCursorCenteredZoom(map: L.Map) {
   if (!zoom) return;
 
   const container = zoom.getContainer();
+  if (!container) return;
   const inBtn = container.querySelector(".leaflet-control-zoom-in");
   const outBtn = container.querySelector(".leaflet-control-zoom-out");
 

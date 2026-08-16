@@ -7,16 +7,17 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postprocess": "node scripts/run-postprocess.mjs"
   },
   "dependencies": {
-    "@types/three": "^0.185.4",
+    "busboy": "^1.6.0",
     "leaflet": "^1.9.4",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "three": "^0.185.1"
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "@types/leaflet": "^1.9.22",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",

@@ -1,19 +1,18 @@
-# Arbor3D 盤點介面（第一版）
+# Arbor3D 盤點介面
 
-登入後台 → 在開源地圖上選公園與路徑 → 才會看到那條路上的樹位與燈號。
+登入後台 → 地圖選公園／學校與路徑 → 錄製路線、匯入 PLY 與原始資料夾。
 
-> **遠端／另一台機器請先讀：[NEXT_STEPS.md](./NEXT_STEPS.md)**  
-> 裡面寫：已完成什麼、真實觀測 JSON／照片／ply 要放哪、還缺什麼。
+> 遠端接資料請讀：[NEXT_STEPS.md](./NEXT_STEPS.md)
 
 ## 使用流程
 
 1. **登入：** 選工作編號、輸入密碼
-2. **選點：** OpenStreetMap 上搜尋／點公園或學校，再點掃描路徑
-3. **（可選）錄製路徑：** 精度 ≤ 10 m 才開始記點，可下載 GPX
-4. **盤點：** 看路徑、樹位、綠黃紅燈；紅燈可填現場手測並匯出 CSV
-5. **待複核／詳情／3D**（詳情有真實照片、遮罩、剖面；3D 讀真實 `.ply`）
+2. **選點：** 搜尋／點公園或學校
+3. **錄製路徑（可選）：** 精度 ≤ 10 m 才記點；停止時可保存並顯示在地圖上
+4. **匯入：** 點選路徑 → 選年度、上傳去噪 PLY、高斯濺射 PLY、原始資料夾（編號隨資料夾名）
+5. **已盤點路徑：** 可查看樹表、Segmentation 與照片
 
-地圖用 [Leaflet](https://leafletjs.com/) + [OpenStreetMap](https://www.openstreetmap.org/copyright)，不需 API key。
+地圖用 [Leaflet](https://leafletjs.com/) + 國土測繪底圖。
 
 ## 示範帳號
 
@@ -23,26 +22,25 @@
 | E-2041 | 陳雅婷 | arbor2041 |
 | E-3308 | 黃建宏 | arbor3308 |
 
-## 目前可驗證的實測資料
+## 示範資料
 
 - **逢甲大學 → 校園掃描路徑**（掃描 `20260812070325`，5 棵樹）
 - JSON：`src/data/inventories/20260812070325.json`
 - 媒體：`public/scans/20260812070325/`
-- Tree_002、Tree_004 為淡紅（待複核），不要當正式樹圍
-
-其他地點要接新掃描：見 [NEXT_STEPS.md](./NEXT_STEPS.md)。
-
-## 燈號
-
-- **淡綠：** 演算法較可信
-- **淡黃：** 有數字，但不是標準 1.3 m
-- **淡紅：** 卡尺偏寬或量不到，現場再量，不要當正式樹圍
 
 ## 啟動
 
 ```bash
 npm install
 npm run dev
+```
+
+接量測管線（可選）：
+
+```bash
+export ARBOR3D_CMD='python3 /path/to/script.py --job-dir {jobDir} --scan-id {scanId}'
+# 或
+export ARBOR3D_ROOT=/path/to/Arbor3D
 ```
 
 倉庫：https://github.com/toby0407-del/arbor3d-interface

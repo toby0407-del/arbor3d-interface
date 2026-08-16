@@ -1,16 +1,14 @@
-import type { LatLngBoundsExpression } from "leaflet";
-
 /**
  * 可拖曳外圍：東西向再拓約 1.5 倍。
  * 搭配 maxBoundsViscosity=1，邊緣釘死，不會滑出露出底色。
  */
-export const TAIWAN_BOUNDS: LatLngBoundsExpression = [
+export const TAIWAN_BOUNDS: [[number, number], [number, number]] = [
   [19.0, 114.8],
   [29.0, 127.9],
 ];
 
 /** 初始畫面：台灣本島置中 */
-export const MAIN_ISLAND_BOUNDS: LatLngBoundsExpression = [
+export const MAIN_ISLAND_BOUNDS: [[number, number], [number, number]] = [
   [21.5, 119.6],
   [25.6, 122.4],
 ];

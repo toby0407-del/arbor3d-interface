@@ -31,3 +31,8 @@ src/data/raw_taiwan_parks.json
 src/data/raw_taiwan_schools.json
 # Superseded by taiwan_sites.json
 src/data/taichung_sites.json
+
+# Import inbox (uploaded scan folders)
+inbox/**
+!inbox/.gitkeep
+public/scans/**/_inbox_staged/

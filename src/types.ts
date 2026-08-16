@@ -27,9 +27,3 @@ export type ParkInventoryReport = {
 };
 
 export type TrafficLight = "green" | "yellow" | "red";
-
-export type Route =
-  | { name: "overview" }
-  | { name: "review" }
-  | { name: "detail"; treeId: string }
-  | { name: "splat"; treeId: string };
