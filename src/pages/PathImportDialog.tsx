@@ -1,4 +1,4 @@
-import { useEffect, useState, type InputHTMLAttributes } from "react";
+import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
 import {
   createImportJob,
   defaultScanId,
@@ -32,19 +32,25 @@ const SLOTS: {
     key: "denoised",
     kind: "ply",
     title: "去噪 PLY",
-    hint: "請選 .ply 檔",
+    hint: "這次解算去噪後的那一個 .ply",
   },
   {
     key: "gaussian",
     kind: "ply",
     title: "高斯濺射 PLY",
-    hint: "請選 .ply 檔",
+    hint: "訓練完成後匯出的 .ply，不要用 input.ply",
   },
   {
-    key: "raw",
+    key: "rawGo",
     kind: "folder",
-    title: "原始資料夾",
-    hint: "現場原始拍攝資料夾（編號會跟此資料夾名）",
+    title: "原始／去程照片",
+    hint: "同一趟影像，或左鏡頭／走過去的資料夾",
+  },
+  {
+    key: "rawReturn",
+    kind: "folder",
+    title: "回程照片（選填）",
+    hint: "有走回來或右鏡頭再選；單趟可留空",
   },
 ];
 
@@ -54,9 +60,10 @@ function emptySlot(): SlotState {
 
 function emptySlots(): Record<FolderSlot, SlotState> {
   return {
-    raw: emptySlot(),
     denoised: emptySlot(),
     gaussian: emptySlot(),
+    rawGo: emptySlot(),
+    rawReturn: emptySlot(),
   };
 }
 
@@ -139,11 +146,32 @@ function stageClass(status: string) {
   return "";
 }
 
-export function resolveSegmentLabel(slots: Record<FolderSlot, SlotState>): string {
-  return slots.raw.rootLabel || "未命名路段";
+function stageStatusLabel(status: string) {
+  if (status === "pending") return "等待";
+  if (status === "running") return "進行中";
+  if (status === "done") return "完成";
+  if (status === "error") return "失敗";
+  if (status === "skipped") return "略過";
+  return status;
 }
 
-export function folderNameToScanId(folderName: string): string {
+function jobStatusLabel(status: string) {
+  if (status === "receiving") return "接收中";
+  if (status === "queued") return "排隊中";
+  if (status === "running") return "處理中";
+  if (status === "done") return "完成";
+  if (status === "error") return "失敗";
+  return status;
+}
+
+function resolveSegmentLabel(slots: Record<FolderSlot, SlotState>): string {
+  const go = slots.rawGo.rootLabel;
+  const back = slots.rawReturn.rootLabel;
+  if (go && back) return `${go}＋${back}`;
+  return go || back || "未命名路段";
+}
+
+function folderNameToScanId(folderName: string): string {
   const cleaned = folderName
     .trim()
     .replace(/\s+/g, "_")
@@ -185,8 +213,8 @@ function validateAll(slots: Record<FolderSlot, SlotState>): string | null {
   if (!slots.gaussian.formatOk) {
     return slots.gaussian.formatMsg || "請上傳高斯濺射 .ply";
   }
-  if (!slots.raw.formatOk) {
-    return slots.raw.formatMsg || "請選擇原始資料夾";
+  if (!slots.rawGo.formatOk) {
+    return slots.rawGo.formatMsg || "請選擇原始／去程照片資料夾";
   }
   return null;
 }
@@ -218,13 +246,18 @@ export function PathImportDialog({
   const folderLabel = resolveSegmentLabel(slots);
   const segmentLabel = `${year} · ${folderLabel}`;
   const years = yearOptions();
-  const derivedScanId = slots.raw.rootLabel
-    ? folderNameToScanId(slots.raw.rootLabel)
+  const derivedScanId = slots.rawGo.rootLabel
+    ? folderNameToScanId(slots.rawGo.rootLabel)
     : "";
+  const lastDerived = useRef("");
   const formatError = validateAll(slots);
 
   useEffect(() => {
-    if (derivedScanId) setScanId(derivedScanId);
+    if (!derivedScanId) return;
+    setScanId((prev) =>
+      !prev || prev === lastDerived.current ? derivedScanId : prev,
+    );
+    lastDerived.current = derivedScanId;
   }, [derivedScanId]);
 
   useEffect(() => {
@@ -274,9 +307,10 @@ export function PathImportDialog({
           note.trim() ||
           `${year} / ${parkName} / ${pathName} / ${folderLabel}`,
         files: {
-          raw: slots.raw.files,
           denoised: slots.denoised.files,
           gaussian: slots.gaussian.files,
+          rawGo: slots.rawGo.files,
+          rawReturn: slots.rawReturn.files,
         },
       });
       setJob(next);
@@ -302,7 +336,7 @@ export function PathImportDialog({
             <p className="path-db-kicker">{parkName}</p>
             <h2 id="path-import-title">匯入 · {pathName}</h2>
             <p>
-              上兩項為 .ply，最下為原始資料夾。上傳前會先驗證格式。標記：
+              上兩項為去噪與高斯濺射 .ply；照片可只選同一趟，回程／另一側鏡頭選填。標記：
               <strong> {segmentLabel || "—"}</strong>
             </p>
           </div>
@@ -336,13 +370,13 @@ export function PathImportDialog({
                 </select>
               </label>
               <label className="login-field">
-                編號 ID（隨原始資料夾）
+                編號 ID
                 <input
                   value={scanId}
-                  readOnly
                   disabled={busy}
-                  placeholder="請先選最下方原始資料夾"
-                  title="會自動等於原始資料夾名稱"
+                  placeholder="請先選照片資料夾，也可自行修改"
+                  title="預設等於照片資料夾名稱，可改"
+                  onChange={(e) => setScanId(e.target.value)}
                 />
               </label>
               <label className="login-field">
@@ -428,14 +462,16 @@ export function PathImportDialog({
                     <div className="meta-kicker">工作 {job.id}</div>
                     <strong>{job.scanId}</strong>
                   </div>
-                  <span className={`import-badge is-${job.status}`}>{job.status}</span>
+                  <span className={`import-badge is-${job.status}`}>
+                    {jobStatusLabel(job.status)}
+                  </span>
                 </div>
                 <p className="import-message">{job.message}</p>
                 <ol className="import-stages">
                   {job.stages.map((stage) => (
                     <li key={stage.id} className={stageClass(stage.status)}>
                       <span>{stage.label}</span>
-                      <span>{stage.status}</span>
+                      <span>{stageStatusLabel(stage.status)}</span>
                     </li>
                   ))}
                 </ol>

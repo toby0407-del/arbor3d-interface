@@ -2,15 +2,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import type { LatLng, ParkSite } from "../data/sites";
 import { siteHasInventory } from "../data/sites";
-import { MAIN_ISLAND_BOUNDS, TAIWAN_BOUNDS, TAIWAN_CENTER, TAIWAN_DEFAULT_ZOOM, TAIWAN_MIN_ZOOM, USER_VIEW_METERS } from "../lib/mapBounds";
+import { TAIWAN_BOUNDS, TAIWAN_CENTER, TAIWAN_DEFAULT_ZOOM, TAIWAN_MIN_ZOOM } from "../lib/mapBounds";
 import {
   addTaiwanBasemap,
   enableCursorCenteredZoom,
   type TaiwanBasemapMode,
 } from "../lib/mapTiles";
-import { geoErrorMessage, getBestPosition } from "../lib/geolocation";
+import { geoErrorMessage, shouldAcceptGeoFix } from "../lib/geolocation";
 import { readMapView, writeMapView } from "../lib/mapViewStore";
 import type { MapOverlay } from "../lib/mapOverlays";
+import type { MapTreeMarker } from "../lib/treePlacement";
+import type { TrafficLight } from "../types";
 
 type Props = {
   sites: ParkSite[];
@@ -19,8 +21,10 @@ type Props = {
   liveTrack?: LatLng[];
   recording?: boolean;
   overlays?: MapOverlay[];
+  treeMarkers?: MapTreeMarker[];
   onPickPark: (parkId: string) => void;
   onPickPath: (parkId: string, pathId: string) => void;
+  onPickTree?: (treeId: string) => void;
   onUserPosition?: (here: LatLng) => void;
 };
 
@@ -48,6 +52,17 @@ function focusBounds(site: ParkSite, pathId: string | null): L.LatLngBounds {
     return L.latLngBounds(path.polyline);
   }
   return L.latLng(site.center[0], site.center[1]).toBounds(350);
+}
+
+function treePin(light: TrafficLight) {
+  const fill =
+    light === "green" ? "#7dae7a" : light === "yellow" ? "#d2b56a" : "#d08980";
+  return L.divIcon({
+    className: "osm-pin",
+    html: `<span class="osm-tree-dot" style="background:${fill}"></span>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  });
 }
 
 function inventoryPin() {
@@ -134,8 +149,10 @@ export function OsmSiteMap({
   liveTrack = [],
   recording = false,
   overlays = [],
+  treeMarkers = [],
   onPickPark,
   onPickPath,
+  onPickTree,
   onUserPosition,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -144,15 +161,24 @@ export function OsmSiteMap({
   const liveLayerRef = useRef<L.LayerGroup | null>(null);
   const userLayerRef = useRef<L.LayerGroup | null>(null);
   const overlayLayerRef = useRef<L.LayerGroup | null>(null);
-  const callbacks = useRef({ onPickPark, onPickPath, onUserPosition });
+  const treeLayerRef = useRef<L.LayerGroup | null>(null);
+  const callbacks = useRef({ onPickPark, onPickPath, onPickTree, onUserPosition });
   const overlaysRef = useRef(overlays);
   overlaysRef.current = overlays;
+  const treeMarkersRef = useRef(treeMarkers);
+  treeMarkersRef.current = treeMarkers;
   const lastFocusKey = useRef<string>("");
   const watchIdRef = useRef<number | null>(null);
   const userPosRef = useRef<LatLng | null>(null);
   const followingRef = useRef(false);
-  const programmaticMoveRef = useRef(false);
+  const programmaticUntilRef = useRef(0);
   const locateGenRef = useRef(0);
+  const pendingFlyRef = useRef(false);
+  const followWantedRef = useRef(false);
+  const pendingJumpRef = useRef<LatLng | null>(null);
+  const haveGoodFixRef = useRef(false);
+  const lastAccuracyRef = useRef<number | null>(null);
+  const liveFixRef = useRef(false);
   const [locateNote, setLocateNote] = useState("進入後會先定位，再移到你附近");
   const [locating, setLocating] = useState(false);
   const [following, setFollowing] = useState(false);
@@ -169,9 +195,8 @@ export function OsmSiteMap({
   sitesRef.current = sites;
   selectedRef.current = selectedSite;
   selectedPathRef.current = selectedPathId;
-  followingRef.current = following;
   basemapModeRef.current = basemapMode;
-  callbacks.current = { onPickPark, onPickPath, onUserPosition };
+  callbacks.current = { onPickPark, onPickPath, onPickTree, onUserPosition };
 
   const persistView = useCallback(() => {
     const map = mapRef.current;
@@ -195,13 +220,13 @@ export function OsmSiteMap({
     if (!map) return;
     const taiwan = L.latLngBounds(TAIWAN_BOUNDS[0], TAIWAN_BOUNDS[1]);
     if (!taiwan.contains(here)) return;
-    programmaticMoveRef.current = true;
+    programmaticUntilRef.current = Math.max(
+      programmaticUntilRef.current,
+      Date.now() + 900,
+    );
     // 點「我的位置」icon → 放大
     const nextZoom = Math.max(map.getZoom(), 18);
     map.flyTo(here, nextZoom, { duration: 0.65 });
-    window.setTimeout(() => {
-      programmaticMoveRef.current = false;
-    }, 850);
     setLocateNote("已放大到我的位置。");
   }, []);
 
@@ -210,6 +235,7 @@ export function OsmSiteMap({
       const userLayer = userLayerRef.current;
       if (!userLayer) return;
       userPosRef.current = here;
+      haveGoodFixRef.current = true;
       callbacks.current.onUserPosition?.(here);
       userLayer.clearLayers();
       L.circle(here, {
@@ -240,88 +266,130 @@ export function OsmSiteMap({
     }
   }, []);
 
-  const flyToUser = useCallback((here: LatLng, animate = true) => {
+  const commitJump = useCallback(() => {
+    const map = mapRef.current;
+    const target = pendingJumpRef.current;
+    if (!map || !target) return false;
+    const size = map.getSize();
+    if (!size.x || !size.y) return false;
+    map.stop();
+    map.setView(target, 15, { animate: false });
+    const c = map.getCenter();
+    return Math.abs(c.lat - target[0]) < 0.02 && Math.abs(c.lng - target[1]) < 0.02;
+  }, []);
+
+  const flyToUser = useCallback((here: LatLng, _animate = true) => {
     const map = mapRef.current;
     if (!map) return false;
-    applyTaiwanLock(map);
     const taiwan = L.latLngBounds(TAIWAN_BOUNDS[0], TAIWAN_BOUNDS[1]);
     if (!taiwan.contains(here)) {
       setLocateNote("你的位置不在台灣／離島範圍內，地圖只顯示台灣地區。");
       return false;
     }
-    const zoom = Math.min(
-      16,
-      Math.max(
-        14,
-        map.getBoundsZoom(
-          L.latLng(here[0], here[1]).toBounds(USER_VIEW_METERS),
-          false,
-        ),
-      ),
-    );
-    programmaticMoveRef.current = true;
-    if (animate) {
-      map.flyTo(here, zoom, { duration: 0.85 });
-    } else {
-      map.setView(here, zoom, { animate: false });
-    }
-    window.setTimeout(() => {
-      programmaticMoveRef.current = false;
-    }, animate ? 1000 : 80);
+    pendingJumpRef.current = here;
+    programmaticUntilRef.current = Date.now() + 2500;
+    const tryJump = () => {
+      commitJump();
+    };
+    tryJump();
+    requestAnimationFrame(tryJump);
+    window.setTimeout(tryJump, 50);
+    window.setTimeout(tryJump, 200);
+    window.setTimeout(tryJump, 500);
     return true;
-  }, []);
+  }, [commitJump]);
 
   const panFollowUser = useCallback((here: LatLng) => {
     const map = mapRef.current;
     if (!map || !followingRef.current) return;
+    if (Date.now() < programmaticUntilRef.current) return;
     const taiwan = L.latLngBounds(TAIWAN_BOUNDS[0], TAIWAN_BOUNDS[1]);
     if (!taiwan.contains(here)) return;
-    programmaticMoveRef.current = true;
+    if (map.getZoom() < 14) {
+      flyToUser(here);
+      return;
+    }
+    programmaticUntilRef.current = Math.max(
+      programmaticUntilRef.current,
+      Date.now() + 500,
+    );
     map.panTo(here, { animate: true, duration: 0.35 });
-    window.setTimeout(() => {
-      programmaticMoveRef.current = false;
-    }, 400);
-  }, []);
+  }, [flyToUser]);
 
   const startWatch = useCallback(() => {
     stopWatch();
     if (!navigator.geolocation) return;
-    // 追蹤也走快速模式（Wi‑Fi），較不易在室內斷掉
     watchIdRef.current = navigator.geolocation.watchPosition(
       (next) => {
         const point: LatLng = [next.coords.latitude, next.coords.longitude];
+        const taiwan = L.latLngBounds(TAIWAN_BOUNDS[0], TAIWAN_BOUNDS[1]);
+        if (
+          !Number.isFinite(point[0]) ||
+          !Number.isFinite(point[1]) ||
+          !taiwan.contains(point)
+        ) {
+          if (!haveGoodFixRef.current) {
+            setLocateNote("目前定位還不夠精準，未移動地圖。");
+          }
+          return;
+        }
+        const prev =
+          liveFixRef.current && userPosRef.current && lastAccuracyRef.current != null
+            ? {
+                lat: userPosRef.current[0],
+                lng: userPosRef.current[1],
+                accuracy: lastAccuracyRef.current,
+              }
+            : null;
+        if (
+          !shouldAcceptGeoFix(
+            {
+              lat: point[0],
+              lng: point[1],
+              accuracy: next.coords.accuracy,
+            },
+            prev,
+          )
+        ) {
+          return;
+        }
+        lastAccuracyRef.current = next.coords.accuracy;
+        liveFixRef.current = true;
         drawUser(point);
+        setLocating(false);
+        setBootLocating(false);
+
+        if (pendingFlyRef.current) {
+          pendingFlyRef.current = false;
+          const ok = flyToUser(point);
+          if (followWantedRef.current && ok) {
+            followingRef.current = true;
+            setFollowing(true);
+            setLocateNote("追蹤中。");
+          } else if (ok) {
+            setLocateNote("快速定位完成。");
+          }
+          return;
+        }
+
+        if (Date.now() < programmaticUntilRef.current) return;
         if (followingRef.current) panFollowUser(point);
       },
-      () => {
-        /* keep last good fix */
+      (err) => {
+        setLocating(false);
+        setBootLocating(false);
+        if (!haveGoodFixRef.current) {
+          setLocateNote(geoErrorMessage(err.code));
+        }
       },
       {
-        enableHighAccuracy: false,
-        maximumAge: 8_000,
-        timeout: 20_000,
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 8_000,
       },
     );
-  }, [drawUser, panFollowUser, stopWatch]);
+  }, [drawUser, flyToUser, panFollowUser, stopWatch]);
 
-  const stopFollowing = useCallback((note?: string) => {
-    followingRef.current = false;
-    setFollowing(false);
-    setLocateNote(note ?? "已停止追蹤。再按「快速定位」可重新跟隨。");
-  }, []);
-
-  const fitMainIsland = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    map.invalidateSize();
-    map.fitBounds(L.latLngBounds(MAIN_ISLAND_BOUNDS[0], MAIN_ISLAND_BOUNDS[1]), {
-      padding: [36, 36],
-      maxZoom: 8,
-      animate: false,
-    });
-  }, []);
-
-  /** fly=true：移到使用者；follow=true：之後持續跟隨；boot=進場第一次定位 */
   const locateMe = useCallback(
     (opts: { fly?: boolean; follow?: boolean; boot?: boolean } = {}) => {
       const { fly = true, follow = false, boot = false } = opts;
@@ -342,69 +410,42 @@ export function OsmSiteMap({
       }
 
       const gen = ++locateGenRef.current;
+      pendingFlyRef.current = fly;
+      followWantedRef.current = follow;
+      followingRef.current = false;
+      setFollowing(false);
       setLocating(true);
       if (boot) setBootLocating(true);
       setLocateNote("請允許使用位置，正在定位…");
-
-      void (async () => {
-        try {
-          const fix = await getBestPosition((msg) => {
-            if (gen !== locateGenRef.current) return;
-            setLocateNote(msg);
-          });
-          if (gen !== locateGenRef.current || !mapRef.current) return;
-
-          const here: LatLng = [fix.lat, fix.lng];
-          drawUser(here);
-          setLocating(false);
-          setBootLocating(false);
-          const acc = Math.round(fix.accuracy);
-          const modeHint = fix.highAccuracy ? "GPS" : "Wi‑Fi／網路";
-
-          if (fly) {
-            const ok = flyToUser(here);
-            if (!ok) {
-              setFollowing(false);
-              followingRef.current = false;
-              startWatch();
-              return;
-            }
-          }
-
-          if (follow) {
-            followingRef.current = true;
-            setFollowing(true);
-            setLocateNote(
-              `追蹤中（${modeHint}，誤差約 ${acc} 公尺）。再按一次可停止。`,
-            );
-          } else {
-            setLocateNote(
-              `快速定位完成（${modeHint}，誤差約 ${acc} 公尺）。`,
-            );
-          }
-          startWatch();
-        } catch (err) {
-          if (gen !== locateGenRef.current) return;
-          setLocating(false);
-          setBootLocating(false);
-          setFollowing(false);
-          followingRef.current = false;
-          const code = (err as GeolocationPositionError)?.code ?? 3;
-          setLocateNote(geoErrorMessage(code));
-          fitMainIsland();
+      if (liveFixRef.current && userPosRef.current && fly) {
+        pendingFlyRef.current = false;
+        const ok = flyToUser(userPosRef.current);
+        setLocating(false);
+        setBootLocating(false);
+        if (follow && ok) {
+          followingRef.current = true;
+          setFollowing(true);
+          setLocateNote("追蹤中。");
+        } else if (ok) {
+          setLocateNote("快速定位完成。");
         }
-      })();
+      }
+      startWatch();
+
+      window.setTimeout(() => {
+        if (gen !== locateGenRef.current) return;
+        if (haveGoodFixRef.current) return;
+        setLocating(false);
+        setBootLocating(false);
+        setLocateNote("定位逾時。請再開 Wi‑Fi 後按「快速定位」。");
+      }, 20_000);
     },
-    [drawUser, fitMainIsland, flyToUser, startWatch],
+    [flyToUser, startWatch],
   );
 
   const onLocateButton = useCallback(() => {
-    if (following) {
-      stopFollowing();
-      return;
-    }
     locateMe({ fly: true, follow: true });
-  }, [following, locateMe, stopFollowing]);
+  }, [locateMe]);
 
   useEffect(() => {
     if (!hostRef.current || mapRef.current) return;
@@ -434,6 +475,7 @@ export function OsmSiteMap({
     layerRef.current = L.layerGroup().addTo(map);
     liveLayerRef.current = L.layerGroup().addTo(map);
     overlayLayerRef.current = L.layerGroup().addTo(map);
+    treeLayerRef.current = L.layerGroup().addTo(map);
     userLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
     applyTaiwanLock(map);
@@ -475,7 +517,8 @@ export function OsmSiteMap({
 
     // 手動拖／捏地圖 → 停止追蹤（與 Google Maps 相同）
     const onDragStart = () => {
-      if (programmaticMoveRef.current) return;
+      if (Date.now() < programmaticUntilRef.current) return;
+      pendingFlyRef.current = false;
       if (followingRef.current) {
         followingRef.current = false;
         setFollowing(false);
@@ -486,8 +529,11 @@ export function OsmSiteMap({
     map.on("zoomstart", onDragStart);
 
     const resize = () => {
-      // 視窗／版面大小變了：只重算尺寸與台灣鎖，不重置中心與縮放
       map.invalidateSize({ animate: false });
+      if (Date.now() < programmaticUntilRef.current) {
+        commitJump();
+        return;
+      }
       applyTaiwanLock(map);
       schedulePersist();
     };
@@ -528,6 +574,7 @@ export function OsmSiteMap({
       layerRef.current = null;
       liveLayerRef.current = null;
       overlayLayerRef.current = null;
+      treeLayerRef.current = null;
       userLayerRef.current = null;
       basemapRef.current = null;
     };
@@ -633,6 +680,22 @@ export function OsmSiteMap({
     }
   }, []);
 
+  const redrawTrees = useCallback(() => {
+    const map = mapRef.current;
+    const layer = treeLayerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    for (const tree of treeMarkersRef.current) {
+      const marker = L.marker(tree.latlng, {
+        icon: treePin(tree.light),
+        zIndexOffset: 700,
+      });
+      marker.bindTooltip(tree.id, { direction: "top", offset: [0, -8] });
+      marker.on("click", () => callbacks.current.onPickTree?.(tree.id));
+      layer.addLayer(marker);
+    }
+  }, []);
+
   useEffect(() => {
     redrawMarkers();
   }, [sites, selectedSite, selectedPathId, redrawMarkers]);
@@ -640,6 +703,10 @@ export function OsmSiteMap({
   useEffect(() => {
     redrawOverlays();
   }, [overlays, redrawOverlays]);
+
+  useEffect(() => {
+    redrawTrees();
+  }, [treeMarkers, redrawTrees]);
 
   // Center selected area (~1/4 view). Soft lock only if user is already inside.
   useEffect(() => {
@@ -682,9 +749,9 @@ export function OsmSiteMap({
     applyTaiwanLock(map);
     map.flyToBounds(area, padding);
     if (here) {
-      setLocateNote("選定地區已置中。你目前較遠，可再按「定位我所在位置」飛到約 100 公里範圍。");
+      setLocateNote("選定地區已置中。你目前較遠，可再按「快速定位」移到你附近。");
     } else {
-      setLocateNote("選定地區已置中。請按「定位我所在位置」以你為中心顯示約 100 公里範圍。");
+      setLocateNote("選定地區已置中。請按「快速定位」移到你附近。");
     }
   }, [selectedSite, selectedPathId, sites, recording, liveTrack.length]);
 
@@ -741,10 +808,10 @@ export function OsmSiteMap({
         <button
           type="button"
           className={`osm-locate-btn ${following ? "is-following" : ""}`}
-          disabled={locating || recording}
+          disabled={recording}
           onClick={onLocateButton}
         >
-          {locating ? "定位中…" : following ? "停止追蹤" : "快速定位"}
+          {locating ? "定位中…" : following ? "追蹤中" : "快速定位"}
         </button>
         {locateNote ? <div className="osm-locate-note">{locateNote}</div> : null}
       </div>

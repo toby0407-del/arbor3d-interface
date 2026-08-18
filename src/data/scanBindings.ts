@@ -20,7 +20,6 @@ export const SCAN_BINDINGS: ScanBinding[] = [
     pathId: "fengchia-campus",
     pathName: "校園掃描路徑",
     scanId: "20260812070325",
-    // 示意路線：沿樹位相對座標（大致朝南）擺在校區附近；有現場 GPX 後再換真軌跡
     polyline: [
       [24.17995, 120.64838],
       [24.17985, 120.6484],

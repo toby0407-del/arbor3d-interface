@@ -21,12 +21,10 @@ import {
   upsertOverlay,
   type MapOverlay,
 } from "../lib/mapOverlays";
-import { formatDbh } from "../lib/format";
-import { scanAssetUrl } from "../lib/scanMedia";
-import { lightShort, trafficLight } from "../lib/status";
+import { treesAlongPolyline } from "../lib/treePlacement";
 import type { Session } from "../lib/session";
-import type { TreeRecord } from "../types";
 import { PathImportDialog } from "./PathImportDialog";
+import { PathInventoryDialog } from "./PathInventoryDialog";
 
 type Props = {
   session: Session;
@@ -34,11 +32,12 @@ type Props = {
 };
 
 type KindFilter = "all" | SiteKind;
+type Notice = { tone: "ok" | "err"; text: string };
 
 export function SitePickerPage({ session, onLogout }: Props) {
   const [parkId, setParkId] = useState<string | null>(null);
   const [pathId, setPathId] = useState<string | null>(null);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<KindFilter>("all");
   const [userPos, setUserPos] = useState<LatLng | null>(null);
@@ -67,10 +66,14 @@ export function SitePickerPage({ session, onLogout }: Props) {
   const pathReport =
     path?.hasInventory && path.scanId ? getReport(path.scanId) : undefined;
   const liveTrack = useMemo(() => toLatLngs(recorder.points), [recorder.points]);
+  const treeMarkers = useMemo(() => {
+    if (!path?.polyline || !pathReport) return [];
+    return treesAlongPolyline(path.polyline, pathReport.trees);
+  }, [path, pathReport]);
 
   const pickPark = (id: string) => {
     if (recorder.recording) {
-      setNotice("請先停止記錄，再換地點。");
+      setNotice({ tone: "err", text: "請先停止記錄，再換地點。" });
       return;
     }
     setParkId(id);
@@ -78,26 +81,28 @@ export function SitePickerPage({ session, onLogout }: Props) {
     setShowPathDb(false);
     setShowImport(false);
     setPreviewTreeId(null);
-    setNotice("");
+    setNotice(null);
   };
 
   const pickPath = (nextParkId: string, nextPathId: string) => {
     if (recorder.recording) {
-      setNotice("請先停止記錄，再選路徑。");
+      setNotice({ tone: "err", text: "請先停止記錄，再選路徑。" });
       return;
     }
     setParkId(nextParkId);
     setPathId(nextPathId);
     const found = findPath(nextParkId, nextPathId);
     if (!found) return;
-    setNotice("");
-    setShowPathDb(false);
-    setShowImport(true);
+    setNotice(null);
     if (found.hasInventory && found.scanId) {
       const report = getReport(found.scanId);
       setPreviewTreeId(report?.trees[0]?.Tree_ID ?? null);
+      setShowPathDb(true);
+      setShowImport(false);
     } else {
       setPreviewTreeId(null);
+      setShowPathDb(false);
+      setShowImport(true);
     }
   };
 
@@ -105,13 +110,13 @@ export function SitePickerPage({ session, onLogout }: Props) {
     const points = [...recorder.points];
     recorder.stop();
     if (points.length < 2) {
-      setNotice("點數不足，未保存。");
+      setNotice({ tone: "err", text: "點數不足，未保存。" });
       return;
     }
     const wantSave = window.confirm("要保存這次錄製並顯示在地圖上嗎？");
     if (!wantSave) {
       recorder.reset();
-      setNotice("已停止，未保存。");
+      setNotice({ tone: "ok", text: "已停止，未保存。" });
       return;
     }
     const stamp = new Date().toLocaleTimeString("zh-TW", {
@@ -136,7 +141,7 @@ export function SitePickerPage({ session, onLogout }: Props) {
     };
     setOverlays(upsertOverlay(overlay));
     recorder.reset();
-    setNotice(`已保存「${label}」並畫在地圖上。`);
+    setNotice({ tone: "ok", text: `已保存「${label}」並畫在地圖上。` });
   };
 
   const onImported = (info: { label: string; scanId: string; year: number }) => {
@@ -151,23 +156,33 @@ export function SitePickerPage({ session, onLogout }: Props) {
       recorded?.polyline ??
       (path.polyline.length >= 2 ? path.polyline : []);
     if (polyline.length < 2) {
-      setNotice(
-        `已匯入 ${info.year} 年「${info.label}」。此路徑尚無座標，請先錄製並保存路線，才會畫在地圖上。`,
-      );
-      return;
+      setNotice({
+        tone: "ok",
+        text: `已匯入 ${info.year} 年「${info.label}」。此路徑尚無座標，請先錄製並保存路線，才會畫在地圖上。`,
+      });
+    } else {
+      const overlay: MapOverlay = {
+        id: `imp-${info.year}-${parkId}-${pathId}-${info.scanId}`,
+        parkId,
+        pathId,
+        label: info.label,
+        year: info.year,
+        polyline,
+        source: "import",
+        createdAt: new Date().toISOString(),
+      };
+      setOverlays(upsertOverlay(overlay));
+      setNotice({
+        tone: "ok",
+        text: `已標記 ${info.year} 年路段「${info.label}」。`,
+      });
     }
-    const overlay: MapOverlay = {
-      id: `imp-${info.year}-${parkId}-${pathId}-${info.scanId}`,
-      parkId,
-      pathId,
-      label: info.label,
-      year: info.year,
-      polyline,
-      source: "import",
-      createdAt: new Date().toISOString(),
-    };
-    setOverlays(upsertOverlay(overlay));
-    setNotice(`已標記 ${info.year} 年路段「${info.label}」。`);
+    const report = getReport(info.scanId);
+    if (report) {
+      setPreviewTreeId(report.trees[0]?.Tree_ID ?? null);
+      setShowImport(false);
+      setShowPathDb(true);
+    }
   };
 
   return (
@@ -178,14 +193,14 @@ export function SitePickerPage({ session, onLogout }: Props) {
             <BrandMark size={28} />
           </span>
           <div>
-            <div className="brand-name">Arbor3D 後台</div>
+            <div className="brand-name">Arbor3D 樹木盤點</div>
             <div className="brand-sub">
-              {session.workId} · {session.name}
+              {session.workId} · {session.name} · {session.role}
             </div>
           </div>
         </div>
         <p className="picker-hint">
-          公園 {SITE_COUNTS.parks} · 學校 {SITE_COUNTS.schools} · 點路徑即可匯入
+          公園 {SITE_COUNTS.parks} · 學校 {SITE_COUNTS.schools} · 已盤點路徑可直接查看成果
         </p>
         <button type="button" className="ghost-btn" onClick={onLogout}>
           登出
@@ -231,7 +246,7 @@ export function SitePickerPage({ session, onLogout }: Props) {
 
           <h2>地點</h2>
           <ul className="picker-list is-scroll">
-            {filtered.slice(0, 200).map((item) => (
+            {filtered.slice(0, 80).map((item) => (
               <li key={item.id}>
                 <button
                   type="button"
@@ -264,8 +279,8 @@ export function SitePickerPage({ session, onLogout }: Props) {
               </li>
             ))}
           </ul>
-          {filtered.length > 200 ? (
-            <p className="empty">僅顯示前 200 筆</p>
+          {filtered.length > 80 ? (
+            <p className="empty">僅顯示前 80 筆，請用搜尋縮小範圍</p>
           ) : null}
           {filtered.length === 0 ? (
             <p className="empty">沒有符合的地點</p>
@@ -273,30 +288,55 @@ export function SitePickerPage({ session, onLogout }: Props) {
 
           {park ? (
             <>
-              <h2>路徑（點選＝匯入）</h2>
+              <h2>路徑</h2>
               <ul className="picker-list">
                 {park.paths.map((item) => (
                   <li key={item.id}>
-                    <button
-                      type="button"
-                      className={`picker-item ${pathId === item.id ? "is-active" : ""}`}
-                      onClick={() => pickPath(park.id, item.id)}
-                    >
-                      <strong>{item.name}</strong>
-                      <span>
-                        {item.hasInventory
-                          ? `掃描 ${item.scanId} · 點此匯入`
-                          : "點此匯入資料"}
-                      </span>
-                    </button>
+                    <div className={`path-row ${pathId === item.id ? "is-active" : ""}`}>
+                      <button
+                        type="button"
+                        className="picker-item"
+                        onClick={() => pickPath(park.id, item.id)}
+                      >
+                        <strong>{item.name}</strong>
+                        <span>
+                          {item.hasInventory
+                            ? `掃描 ${item.scanId} · 點此查看盤點`
+                            : "尚無盤點 · 點此匯入"}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => {
+                          setParkId(park.id);
+                          setPathId(item.id);
+                          setShowPathDb(false);
+                          setShowImport(true);
+                        }}
+                      >
+                        匯入
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
             </>
           ) : null}
 
-          <section className="record-panel">
-            <h2>錄製路徑</h2>
+          <details className="record-panel">
+            <summary>
+              錄製路徑
+              <span>
+                {recorder.recording
+                  ? recorder.locked
+                    ? "記錄中"
+                    : "等待定位"
+                  : "未記錄"}
+                {" · "}
+                {recorder.points.length} 點
+              </span>
+            </summary>
             <p className="record-help">
               室外定位，精度 ≤ {START_ACCURACY_M} m 才開始記點。停止時可選擇保存到地圖。
             </p>
@@ -316,10 +356,10 @@ export function SitePickerPage({ session, onLogout }: Props) {
                   style={{ marginTop: 0 }}
                   onClick={() => {
                     if (!parkId) {
-                      setNotice("請先選地點。");
+                      setNotice({ tone: "err", text: "請先選地點。" });
                       return;
                     }
-                    setNotice("");
+                    setNotice(null);
                     recorder.start();
                   }}
                 >
@@ -350,20 +390,8 @@ export function SitePickerPage({ session, onLogout }: Props) {
                 清除
               </button>
             </div>
-            <p className="record-status">
-              {recorder.recording
-                ? recorder.locked
-                  ? "記錄中"
-                  : `等待 ≤ ${START_ACCURACY_M} m`
-                : "未記錄"}
-              {" · "}
-              {recorder.points.length} 點
-              {recorder.lastAccuracy != null
-                ? ` · ${Math.round(recorder.lastAccuracy)} m`
-                : ""}
-            </p>
             {recorder.error ? <p className="login-error">{recorder.error}</p> : null}
-          </section>
+          </details>
 
           {overlays.length > 0 ? (
             <section className="overlay-list">
@@ -394,7 +422,11 @@ export function SitePickerPage({ session, onLogout }: Props) {
             </section>
           ) : null}
 
-          {notice ? <p className="login-error">{notice}</p> : null}
+          {notice ? (
+            <p className={notice.tone === "ok" ? "picker-notice" : "login-error"}>
+              {notice.text}
+            </p>
+          ) : null}
 
           <ColorLegend compact />
         </aside>
@@ -406,8 +438,16 @@ export function SitePickerPage({ session, onLogout }: Props) {
           liveTrack={liveTrack}
           recording={recorder.recording}
           overlays={overlays}
+          treeMarkers={treeMarkers}
           onPickPark={pickPark}
           onPickPath={pickPath}
+          onPickTree={(treeId) => {
+            setPreviewTreeId(treeId);
+            if (pathReport) {
+              setShowImport(false);
+              setShowPathDb(true);
+            }
+          }}
           onUserPosition={setUserPos}
         />
       </div>
@@ -430,187 +470,15 @@ export function SitePickerPage({ session, onLogout }: Props) {
         <PathInventoryDialog
           parkName={park.name}
           pathName={path.name}
-          scanId={pathReport.scan_id}
-          trees={pathReport.trees}
+          report={pathReport}
           previewTreeId={previewTreeId}
           onPreviewTree={setPreviewTreeId}
           onClose={() => setShowPathDb(false)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function PathInventoryDialog({
-  parkName,
-  pathName,
-  scanId,
-  trees,
-  previewTreeId,
-  onPreviewTree,
-  onClose,
-}: {
-  parkName: string;
-  pathName: string;
-  scanId: string;
-  trees: TreeRecord[];
-  previewTreeId: string | null;
-  onPreviewTree: (treeId: string) => void;
-  onClose: () => void;
-}) {
-  const [lightbox, setLightbox] = useState<{ src: string; title: string } | null>(
-    null,
-  );
-  const preview =
-    trees.find((tree) => tree.Tree_ID === previewTreeId) ?? trees[0] ?? null;
-  const pathMapUrl = `/scans/${scanId}/maps/tree_id_map_dbh.png`;
-  const maskUrl = preview ? scanAssetUrl(scanId, preview.Mask_Path) : null;
-  const photoUrl = preview ? scanAssetUrl(scanId, preview.Best_Photo) : null;
-
-  return (
-    <div className="path-db-backdrop" role="presentation" onClick={onClose}>
-      <div
-        className="path-db-panel is-wide"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="path-db-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="path-db-head">
-          <div>
-            <p className="path-db-kicker">{parkName}</p>
-            <h2 id="path-db-title">{pathName}</h2>
-            <p>
-              掃描 {scanId} · {trees.length} 棵 · 點樹號可看 Segmentation · 點圖可放大
-            </p>
-          </div>
-          <button type="button" className="ghost-btn" onClick={onClose}>
-            關閉
-          </button>
-        </header>
-
-        <div className="path-db-body">
-          <aside className="path-db-map">
-            <h3>路徑圖</h3>
-            <button
-              type="button"
-              className="path-db-thumb"
-              onClick={() =>
-                setLightbox({ src: pathMapUrl, title: `${pathName} · 路徑圖` })
-              }
-            >
-              <img src={pathMapUrl} alt={`${pathName} 路徑與樹位`} />
-              <span>點擊放大</span>
-            </button>
-            <p>樹上編號對應中間表樹號</p>
-          </aside>
-
-          <div className="path-db-table-wrap">
-            <table className="path-db-table">
-              <thead>
-                <tr>
-                  <th>樹號</th>
-                  <th>胸徑</th>
-                  <th>狀態</th>
-                  <th>備註</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trees.map((tree) => {
-                  const light = trafficLight(tree.DBH_note);
-                  const active = tree.Tree_ID === preview?.Tree_ID;
-                  return (
-                    <tr
-                      key={tree.Tree_ID}
-                      className={active ? "is-active" : undefined}
-                      onClick={() => onPreviewTree(tree.Tree_ID)}
-                    >
-                      <td>
-                        <code>{tree.Tree_ID}</code>
-                      </td>
-                      <td>{formatDbh(tree.DBH_cm)}</td>
-                      <td>
-                        <span className={`path-db-pill is-${light}`}>
-                          {lightShort(light)}
-                        </span>
-                      </td>
-                      <td>{tree.DBH_note || "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <aside className="path-db-preview">
-            <h3>{preview ? preview.Tree_ID : "樹"} · Segmentation</h3>
-            {maskUrl ? (
-              <button
-                type="button"
-                className="path-db-thumb"
-                onClick={() =>
-                  setLightbox({
-                    src: maskUrl,
-                    title: `${preview?.Tree_ID} · Segmentation`,
-                  })
-                }
-              >
-                <img src={maskUrl} alt={`${preview?.Tree_ID} segmentation`} />
-                <span>點擊放大</span>
-              </button>
-            ) : (
-              <div className="path-db-empty">尚無 Segmentation 圖</div>
-            )}
-            {photoUrl ? (
-              <>
-                <h3>原圖</h3>
-                <button
-                  type="button"
-                  className="path-db-thumb"
-                  onClick={() =>
-                    setLightbox({
-                      src: photoUrl,
-                      title: `${preview?.Tree_ID} · 原圖`,
-                    })
-                  }
-                >
-                  <img src={photoUrl} alt={`${preview?.Tree_ID} 照片`} />
-                  <span>點擊放大</span>
-                </button>
-              </>
-            ) : null}
-          </aside>
-        </div>
-      </div>
-
-      {lightbox ? (
-        <div
-          className="path-lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-label={lightbox.title}
-          onClick={(event) => {
-            event.stopPropagation();
-            setLightbox(null);
+          onImport={() => {
+            setShowPathDb(false);
+            setShowImport(true);
           }}
-        >
-          <div
-            className="path-lightbox-card"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header>
-              <strong>{lightbox.title}</strong>
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={() => setLightbox(null)}
-              >
-                關閉
-              </button>
-            </header>
-            <img src={lightbox.src} alt={lightbox.title} />
-          </div>
-        </div>
+        />
       ) : null}
     </div>
   );

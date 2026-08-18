@@ -16,10 +16,17 @@ export type ImportJob = {
   logs: string[];
   createdAt: string;
   updatedAt: string;
-  fileCounts: { raw: number; denoised: number; gaussian: number };
+  fileCounts: {
+    denoised: number;
+    gaussian: number;
+    rawGo: number;
+    rawReturn: number;
+  };
 };
 
-export type FolderSlot = "raw" | "denoised" | "gaussian";
+export type FolderSlot = "denoised" | "gaussian" | "rawGo" | "rawReturn";
+
+const ALL_SLOTS: FolderSlot[] = ["denoised", "gaussian", "rawGo", "rawReturn"];
 
 export async function createImportJob(input: {
   scanId: string;
@@ -29,7 +36,7 @@ export async function createImportJob(input: {
   const form = new FormData();
   form.append("scanId", input.scanId);
   form.append("note", input.note);
-  for (const slot of ["raw", "denoised", "gaussian"] as const) {
+  for (const slot of ALL_SLOTS) {
     for (const file of input.files[slot]) {
       const name =
         (file as File & { webkitRelativePath?: string }).webkitRelativePath ||

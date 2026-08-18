@@ -1,5 +1,14 @@
 import type { TrafficLight, TreeRecord } from "../types";
 
+export type InventoryStats = {
+  total: number;
+  green: number;
+  yellow: number;
+  red: number;
+  review: number;
+  avgConfidence: number | null;
+};
+
 export function trafficLight(note: string | null | undefined): TrafficLight {
   const value = note ?? "";
   if (
@@ -41,4 +50,36 @@ export function reviewReason(tree: TreeRecord): string {
 
 export function isReviewTree(tree: TreeRecord): boolean {
   return trafficLight(tree.DBH_note) === "red";
+}
+
+export function noteLabel(tree: TreeRecord): string {
+  const reason = reviewReason(tree);
+  if (trafficLight(tree.DBH_note) === "green") return "通過";
+  return reason;
+}
+
+export function inventoryStats(trees: TreeRecord[]): InventoryStats {
+  let green = 0;
+  let yellow = 0;
+  let red = 0;
+  let confSum = 0;
+  let confN = 0;
+  for (const tree of trees) {
+    const light = trafficLight(tree.DBH_note);
+    if (light === "green") green += 1;
+    else if (light === "yellow") yellow += 1;
+    else red += 1;
+    if (tree.YOLO_confidence != null) {
+      confSum += tree.YOLO_confidence;
+      confN += 1;
+    }
+  }
+  return {
+    total: trees.length,
+    green,
+    yellow,
+    red,
+    review: trees.filter(isReviewTree).length,
+    avgConfidence: confN ? confSum / confN : null,
+  };
 }

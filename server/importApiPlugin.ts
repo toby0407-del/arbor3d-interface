@@ -24,13 +24,19 @@ export type ImportJob = {
   logs: string[];
   createdAt: string;
   updatedAt: string;
-  fileCounts: { raw: number; denoised: number; gaussian: number };
+  fileCounts: {
+    denoised: number;
+    gaussian: number;
+    rawGo: number;
+    rawReturn: number;
+  };
 };
 
 const SLOT_LABELS = {
   denoised: "去噪 PLY",
   gaussian: "高斯濺射 PLY",
-  raw: "原始資料夾",
+  rawGo: "去程照片",
+  rawReturn: "回程照片",
 } as const;
 
 type Slot = keyof typeof SLOT_LABELS;
@@ -53,7 +59,7 @@ function defaultStages(): JobStage[] {
     { id: "receive", label: "接收上傳", status: "pending" },
     { id: "denoised", label: "確認去噪 PLY", status: "pending" },
     { id: "gaussian", label: "確認高斯濺射 PLY", status: "pending" },
-    { id: "raw", label: "確認原始資料夾", status: "pending" },
+    { id: "raw", label: "確認去程／回程照片", status: "pending" },
     { id: "measure", label: "後續量測處理", status: "pending" },
     { id: "publish", label: "整理輸出", status: "pending" },
   ];
@@ -188,14 +194,15 @@ export function importApiPlugin(projectRoot: string): Plugin {
       logs: [],
       createdAt: nowIso(),
       updatedAt: nowIso(),
-      fileCounts: { raw: 0, denoised: 0, gaussian: 0 },
+      fileCounts: { rawGo: 0, rawReturn: 0, denoised: 0, gaussian: 0 },
     };
     jobs.set(id, job);
     setStage(job, "receive", "running");
     pushLog(job, "開始接收上傳");
 
     const dir = jobDir(job);
-    await fsp.mkdir(path.join(dir, "raw"), { recursive: true });
+    await fsp.mkdir(path.join(dir, "raw", "go"), { recursive: true });
+    await fsp.mkdir(path.join(dir, "raw", "return"), { recursive: true });
     await fsp.mkdir(path.join(dir, "denoised"), { recursive: true });
     await fsp.mkdir(path.join(dir, "gaussian"), { recursive: true });
 
@@ -225,7 +232,13 @@ export function importApiPlugin(projectRoot: string): Plugin {
         }
         const rel = (info.filename || "file").replace(/^(\.\.[/\\])+/, "");
         const safeRel = rel.split(/[/\\]/).filter((p) => p && p !== "..").join(path.sep);
-        const dest = path.join(dir, slot, safeRel || "file");
+        const destRoot =
+          slot === "rawGo"
+            ? path.join(dir, "raw", "go")
+            : slot === "rawReturn"
+              ? path.join(dir, "raw", "return")
+              : path.join(dir, slot);
+        const dest = path.join(destRoot, safeRel || "file");
         writes.push(
           (async () => {
             await fsp.mkdir(path.dirname(dest), { recursive: true });
@@ -250,7 +263,7 @@ export function importApiPlugin(projectRoot: string): Plugin {
     });
 
     setStage(job, "receive", "done");
-    for (const slot of Object.keys(SLOT_LABELS) as Slot[]) {
+    for (const slot of ["denoised", "gaussian"] as const) {
       const ok = job.fileCounts[slot] > 0;
       setStage(job, slot, ok ? "done" : "error");
       pushLog(
@@ -260,13 +273,24 @@ export function importApiPlugin(projectRoot: string): Plugin {
           : `${SLOT_LABELS[slot]}：未上傳`,
       );
     }
-
-    const missing = (Object.keys(SLOT_LABELS) as Slot[]).filter(
-      (s) => job.fileCounts[s] === 0,
+    const rawOk = job.fileCounts.rawGo > 0;
+    setStage(job, "raw", rawOk ? "done" : "error");
+    pushLog(
+      job,
+      rawOk
+        ? job.fileCounts.rawReturn > 0
+          ? `照片 去程／單趟 ${job.fileCounts.rawGo} 檔、回程 ${job.fileCounts.rawReturn} 檔`
+          : `照片單趟 ${job.fileCounts.rawGo} 檔（未上傳回程）`
+        : `照片資料夾不足（去程 ${job.fileCounts.rawGo}）`,
     );
-    if (missing.length) {
+
+    const missingLabels: string[] = [];
+    if (job.fileCounts.denoised === 0) missingLabels.push(SLOT_LABELS.denoised);
+    if (job.fileCounts.gaussian === 0) missingLabels.push(SLOT_LABELS.gaussian);
+    if (job.fileCounts.rawGo === 0) missingLabels.push(SLOT_LABELS.rawGo);
+    if (missingLabels.length) {
       job.status = "error";
-      job.message = `缺少：${missing.map((s) => SLOT_LABELS[s]).join("、")}`;
+      job.message = `缺少：${missingLabels.join("、")}`;
       await persistJob(job);
       sendJson(res, 400, { job });
       return;

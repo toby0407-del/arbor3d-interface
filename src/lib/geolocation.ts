@@ -1,9 +1,13 @@
 /**
  * 快速可靠定位：
- * 1) 先用快取（幾乎瞬間）
- * 2) Wi‑Fi／網路多路並行，誰先到用誰
- * 3) 最後才短試 GPS
+ * 1) 先用快取（幾乎瞬間，誤差須 ≤ 400 m）
+ * 2) Wi‑Fi／網路（同樣須夠準）
+ * 3) 不夠準才短試 GPS；仍不夠準則回傳最佳結果，由地圖決定不飛過去
  */
+
+/** 誤差超過這個距離就不把地圖移過去（擋掉 10 萬公尺那種 IP 定位） */
+export const MAX_ACCEPTABLE_ACCURACY_M = 400;
+export const MAX_FLY_ACCURACY_M = 10_000;
 
 export type GeoResult = {
   lat: number;
@@ -11,6 +15,45 @@ export type GeoResult = {
   accuracy: number;
   highAccuracy: boolean;
 };
+
+export function isUsableAccuracy(accuracy: number): boolean {
+  return Number.isFinite(accuracy) && accuracy <= MAX_ACCEPTABLE_ACCURACY_M;
+}
+
+export function isFlyableAccuracy(accuracy: number): boolean {
+  return Number.isFinite(accuracy) && accuracy <= MAX_FLY_ACCURACY_M;
+}
+
+function haversineMeters(
+  aLat: number,
+  aLng: number,
+  bLat: number,
+  bLng: number,
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(bLat - aLat);
+  const dLng = toRad(bLng - aLng);
+  const lat1 = toRad(aLat);
+  const lat2 = toRad(bLat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+}
+
+/** 丟掉 IP 粗定位，也避免已經在逢甲又被拉去幾十公里外的埔里。 */
+export function shouldAcceptGeoFix(
+  next: { lat: number; lng: number; accuracy: number },
+  prev: { lat: number; lng: number; accuracy: number } | null,
+): boolean {
+  if (!Number.isFinite(next.lat) || !Number.isFinite(next.lng)) return false;
+  if (!isFlyableAccuracy(next.accuracy)) return false;
+  if (!prev) return true;
+  const moved = haversineMeters(prev.lat, prev.lng, next.lat, next.lng);
+  if (moved > 1_500 && next.accuracy > prev.accuracy) return false;
+  if (moved > 1_500 && next.accuracy > 2_000) return false;
+  return true;
+}
 
 export type GeoProgress = (message: string) => void;
 
@@ -57,6 +100,10 @@ function isValid(pos: GeolocationPosition): boolean {
   );
 }
 
+function isAccurate(pos: GeolocationPosition): boolean {
+  return isValid(pos) && isUsableAccuracy(pos.coords.accuracy);
+}
+
 function readOnce(options: PositionOptions): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -87,7 +134,10 @@ function watchFirstFix(
     };
 
     const watchId = navigator.geolocation.watchPosition(
-      (pos) => finish(() => resolve(pos)),
+      (pos) => {
+        if (!isAccurate(pos)) return;
+        finish(() => resolve(pos));
+      },
       (err) => finish(() => reject(err)),
       options,
     );
@@ -149,14 +199,39 @@ export async function ensureGeolocationPermission(
   return "unknown";
 }
 
-/** 快速可靠：快取 → Wi‑Fi 並行 → 短 GPS */
+/** 快速可靠：快取 → Wi‑Fi 並行 → 短 GPS（都必須夠準才採用） */
 export async function getBestPosition(
   onProgress?: GeoProgress,
 ): Promise<GeoResult> {
   if (!navigator.geolocation) throw unsupportedError();
   await ensureGeolocationPermission(onProgress);
 
-  // 1) 快取：通常 < 1 秒
+  let best: GeolocationPosition | null = null;
+  let bestHigh = false;
+
+  const take = (
+    pos: GeolocationPosition,
+    highAccuracy: boolean,
+  ): GeoResult | null => {
+    if (!isValid(pos)) return null;
+    if (!best || pos.coords.accuracy < best.coords.accuracy) {
+      best = pos;
+      bestHigh = highAccuracy;
+    }
+    return isAccurate(pos) ? toResult(pos, highAccuracy) : null;
+  };
+
+  const requireAccurate = (
+    task: () => Promise<GeolocationPosition>,
+    highAccuracy: boolean,
+  ) => async () => {
+    const pos = await task();
+    const hit = take(pos, highAccuracy);
+    if (!hit) throw timeoutError();
+    return pos;
+  };
+
+  // 1) 快取：通常 < 1 秒，但誤差太大就不用
   onProgress?.("快速定位中…");
   try {
     const cached = await readOnce({
@@ -164,32 +239,30 @@ export async function getBestPosition(
       maximumAge: 300_000,
       timeout: 2_000,
     });
-    if (isValid(cached)) return toResult(cached, false);
+    const hit = take(cached, false);
+    if (hit) return hit;
+    const cachedBest = best as GeolocationPosition | null;
+    if (cachedBest && isFlyableAccuracy(cachedBest.coords.accuracy)) {
+      return toResult(cachedBest, bestHigh);
+    }
   } catch (err) {
     if ((err as GeolocationPositionError)?.code === 1) throw err;
   }
 
-  // 2) Wi‑Fi／網路並行（可靠且比 GPS 快）
+  // 2) Wi‑Fi／網路（夠準才用；否則立刻改試 GPS，不等粗定位耗完）
   onProgress?.("正在定位…");
   try {
-    const coarse = await firstSuccess([
-      () =>
-        readOnce({
-          enableHighAccuracy: false,
-          maximumAge: 60_000,
-          timeout: 8_000,
-        }),
-      () =>
-        watchFirstFix(
-          {
-            enableHighAccuracy: false,
-            maximumAge: 60_000,
-            timeout: 8_000,
-          },
-          8_000,
-        ),
-    ]);
-    return toResult(coarse, false);
+    const coarse = await readOnce({
+      enableHighAccuracy: false,
+      maximumAge: 0,
+      timeout: 8_000,
+    });
+    const hit = take(coarse, false);
+    if (hit) return hit;
+    const coarseBest = best as GeolocationPosition | null;
+    if (coarseBest && isFlyableAccuracy(coarseBest.coords.accuracy)) {
+      return toResult(coarseBest, bestHigh);
+    }
   } catch (err) {
     if ((err as GeolocationPositionError)?.code === 1) throw err;
   }
@@ -198,27 +271,36 @@ export async function getBestPosition(
   onProgress?.("改用精準定位…");
   try {
     const precise = await firstSuccess([
-      () =>
-        readOnce({
-          enableHighAccuracy: true,
-          maximumAge: 30_000,
-          timeout: 10_000,
-        }),
-      () =>
-        watchFirstFix(
-          {
+      requireAccurate(
+        () =>
+          readOnce({
             enableHighAccuracy: true,
-            maximumAge: 30_000,
+            maximumAge: 0,
             timeout: 10_000,
-          },
-          10_000,
-        ),
+          }),
+        true,
+      ),
+      requireAccurate(
+        () =>
+          watchFirstFix(
+            {
+              enableHighAccuracy: true,
+              maximumAge: 0,
+              timeout: 10_000,
+            },
+            10_000,
+          ),
+        true,
+      ),
     ]);
-    return toResult(precise, true);
+    const hit = take(precise, true);
+    if (hit) return hit;
   } catch (err) {
     if ((err as GeolocationPositionError)?.code === 1) throw err;
-    throw err ?? timeoutError();
   }
+
+  if (best) return toResult(best, bestHigh);
+  throw timeoutError();
 }
 
 export function geoErrorMessage(code: number): string {

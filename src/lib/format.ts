@@ -25,6 +25,16 @@ export function formatConfidence(value: number | null | undefined): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+export function formatArc(deg: number | null | undefined): string {
+  if (deg == null) return "—";
+  return `${deg.toFixed(0)}°`;
+}
+
+export function breastHeightLabel(strict: boolean | null | undefined): string {
+  if (strict == null) return "—";
+  return strict ? "標準 1.3 m" : "非 1.3 m";
+}
+
 export function formatScanTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;

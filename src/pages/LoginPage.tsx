@@ -90,7 +90,7 @@ export function LoginPage({ onLogin }: Props) {
             <BrandMark size={64} />
           </div>
           <h1 className="login-hero-title">Arbor3D</h1>
-          <p className="login-hero-copy">樹木盤點</p>
+          <p className="login-hero-copy">環保局樹木盤點</p>
         </aside>
 
         <form className="login-card" onSubmit={submit}>
@@ -113,7 +113,7 @@ export function LoginPage({ onLogin }: Props) {
                   }}
                 >
                   <strong>{staff.name}</strong>
-                  <span>{staff.workId}</span>
+                  <span>{staff.workId} · {staff.role}</span>
                 </button>
               );
             })}
