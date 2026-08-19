@@ -616,7 +616,6 @@ function treeNotes(tree) {
   const notes = [];
   if (tree.arc < 120) notes.push("gap");
   if (tree.dbh >= 55) notes.push("wide_caliper");
-  notes.push("not_1.3m");
   return notes.join(",");
 }
 

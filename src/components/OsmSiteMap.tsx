@@ -22,6 +22,7 @@ type Props = {
   recording?: boolean;
   overlays?: MapOverlay[];
   treeMarkers?: MapTreeMarker[];
+  selectedTreeId?: string | null;
   onPickPark: (parkId: string) => void;
   onPickPath: (parkId: string, pathId: string) => void;
   onPickTree?: (treeId: string) => void;
@@ -62,9 +63,17 @@ function focusBounds(site: ParkSite, pathId: string | null): L.LatLngBounds {
   return L.latLng(site.center[0], site.center[1]).toBounds(350);
 }
 
-function treePin(light: TrafficLight) {
+function treePin(light: TrafficLight, selected = false) {
   const fill =
     light === "green" ? "#7dae7a" : light === "yellow" ? "#d2b56a" : "#d08980";
+  if (selected) {
+    return L.divIcon({
+      className: "osm-pin",
+      html: `<span class="osm-tree-wrap is-on"><span class="osm-tree-pulse"></span><span class="osm-tree-dot is-on" style="background:${fill}"></span></span>`,
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
+    });
+  }
   return L.divIcon({
     className: "osm-pin",
     html: `<span class="osm-tree-dot" style="background:${fill}"></span>`,
@@ -158,6 +167,7 @@ export function OsmSiteMap({
   recording = false,
   overlays = [],
   treeMarkers = [],
+  selectedTreeId = null,
   onPickPark,
   onPickPath,
   onPickTree,
@@ -175,6 +185,8 @@ export function OsmSiteMap({
   overlaysRef.current = overlays;
   const treeMarkersRef = useRef(treeMarkers);
   treeMarkersRef.current = treeMarkers;
+  const selectedTreeRef = useRef(selectedTreeId);
+  selectedTreeRef.current = selectedTreeId;
   const lastFocusKey = useRef<string>("");
   const watchIdRef = useRef<number | null>(null);
   const userPosRef = useRef<LatLng | null>(null);
@@ -685,11 +697,17 @@ export function OsmSiteMap({
     if (!map || !layer) return;
     layer.clearLayers();
     for (const tree of treeMarkersRef.current) {
+      const selected = tree.id === selectedTreeRef.current;
       const marker = L.marker(tree.latlng, {
-        icon: treePin(tree.light),
-        zIndexOffset: 700,
+        icon: treePin(tree.light, selected),
+        zIndexOffset: selected ? 900 : 700,
       });
-      marker.bindTooltip("點擊查看", { direction: "top", offset: [0, -8] });
+      marker.bindTooltip(tree.id, {
+        direction: "top",
+        offset: [0, selected ? -14 : -8],
+        className: selected ? "osm-tree-tip" : undefined,
+      });
+      if (selected) marker.openTooltip();
       marker.on("click", () => callbacks.current.onPickTree?.(tree.id));
       layer.addLayer(marker);
     }
@@ -705,7 +723,7 @@ export function OsmSiteMap({
 
   useEffect(() => {
     redrawTrees();
-  }, [treeMarkers, redrawTrees]);
+  }, [treeMarkers, selectedTreeId, redrawTrees]);
 
   // Center selected area (~1/4 view). Soft lock only if user is already inside.
   useEffect(() => {

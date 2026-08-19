@@ -870,6 +870,58 @@ h1 { margin: 0; font-size: 32px; font-weight: 650; letter-spacing: -0.03em; }
   border: 1px solid var(--line);
   background: #11140f;
 }
+.path-tree-map {
+  width: 100%;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  overflow: hidden;
+}
+.path-tree-map svg {
+  width: 100%;
+  height: min(58svh, 580px);
+  display: block;
+}
+.path-tree-map-line {
+  fill: none;
+  stroke: #ff8a00;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.88;
+}
+.path-tree-map-node {
+  cursor: pointer;
+}
+.path-tree-map-dot {
+  stroke: #1a2216;
+  stroke-width: 2;
+}
+.path-tree-map-node text {
+  font-size: 11px;
+  font-weight: 800;
+  fill: #1a2216;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.path-tree-map-node.is-on .path-tree-map-dot {
+  stroke: #fff700;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 7px rgba(255, 208, 0, 0.95));
+}
+.path-tree-map-node.is-on text {
+  fill: #7a4e00;
+  font-size: 12px;
+}
+.path-tree-map-pulse {
+  fill: rgba(255, 215, 0, 0.42);
+  stroke: #ffd000;
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: selected-pulse 1.2s ease-out infinite;
+}
 .path-db-map img {
   min-height: min(52svh, 520px);
   height: min(58svh, 580px);
@@ -1838,6 +1890,29 @@ h1 { margin: 0; font-size: 32px; font-weight: 650; letter-spacing: -0.03em; }
   height: 12px;
   border-radius: 50%;
   border: 2px solid #1a2216;
+}
+.osm-tree-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+}
+.osm-tree-dot.is-on {
+  width: 16px;
+  height: 16px;
+  border: 3px solid #fff700;
+  box-shadow: 0 0 0 3px rgba(255, 208, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.28);
+  z-index: 2;
+}
+.osm-tree-pulse {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 215, 0, 0.45);
+  border: 2px solid #ffd000;
+  animation: selected-pulse 1.2s ease-out infinite;
 }
 .ply-embed {
   min-height: 280px;

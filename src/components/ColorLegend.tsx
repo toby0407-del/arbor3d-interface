@@ -9,7 +9,7 @@ const ITEMS: { light: TrafficLight; title: string; detail: string }[] = [
   {
     light: "yellow",
     title: "淡黃",
-    detail: "有數字，但非標準 1.3 m。",
+    detail: "有數字，建議現場核對。",
   },
   {
     light: "red",

@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { PathTreeMap } from "../components/PathTreeMap";
 import { PlyViewer } from "../components/PlyViewer";
 import { useFieldMeasures } from "../hooks/useFieldMeasures";
 import {
   CARBON_COEFFS,
   carbonForTree,
+  coeffSelectValue,
+  isCustomCoeff,
   totalCo2Ton,
 } from "../lib/carbon";
 import { downloadInventoryCsv } from "../lib/csv";
@@ -21,7 +24,6 @@ import {
   inventoryStats,
   isReviewTree,
   lightShort,
-  noteLabel,
   reviewReason,
   trafficLight,
 } from "../lib/status";
@@ -134,7 +136,6 @@ export function PathInventoryDialog({
   }, [lightbox, onClose, onPreviewTree, preview, visible]);
 
   const cacheBust = `?t=${encodeURIComponent(report.created_at)}`;
-  const pathMapUrl = `/scans/${report.scan_id}/maps/tree_id_map_dbh.png${cacheBust}`;
   const maskUrl = preview
     ? scanAssetUrl(report.scan_id, preview.Mask_Path, cacheBust)
     : null;
@@ -218,15 +219,12 @@ export function PathInventoryDialog({
         <div className="path-db-body">
           <aside className="path-db-map">
             <h3>路徑圖</h3>
-            <ZoomImage
-              src={pathMapUrl}
-              title="路徑圖"
-              alt={`${pathName} 路徑與樹位`}
-              onOpen={() =>
-                setLightbox({ src: pathMapUrl, title: `${pathName} · 路徑圖` })
-              }
+            <PathTreeMap
+              trees={report.trees}
+              selectedId={preview?.Tree_ID ?? null}
+              onPick={onPreviewTree}
             />
-            <p>點位顏色對應燈號，樹號看中間表</p>
+            <p>點中間資料列，左邊對應樹會亮燈；也可直接點路徑圖上的點</p>
             {stats.review > 0 ? (
               <section className="review-mini">
                 <h3>待複核 {stats.review}</h3>
@@ -318,6 +316,7 @@ export function PathInventoryDialog({
                       吸收 CO₂ 當量 [D×3.667] (ton)
                     </th>
                     <th>測量日期</th>
+                    <th>備註</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -338,11 +337,18 @@ export function PathInventoryDialog({
                           <code>{tree.Tree_ID}</code>
                         </td>
                         <td>{row.circumferenceM?.toFixed(3) ?? "—"}</td>
-                        <td>{row.heightM?.toFixed(1) ?? "—"}</td>
+                        <td>
+                          {row.heightM != null
+                            ? row.heightEstimated && row.heightErrorM != null
+                              ? `${row.heightM.toFixed(1)} ±${row.heightErrorM.toFixed(0)}`
+                              : row.heightM.toFixed(1)
+                            : "—"}
+                        </td>
                         <td>{row.coeff}</td>
                         <td>{row.carbonD?.toFixed(4) ?? "—"}</td>
                         <td>{row.co2Ton?.toFixed(3) ?? "—"}</td>
                         <td>{row.measuredAt}</td>
+                        <td>{measures[tree.Tree_ID]?.note?.trim() || "—"}</td>
                       </tr>
                     );
                   })}
@@ -362,7 +368,7 @@ export function PathInventoryDialog({
                         }, 0)
                         .toFixed(3)}
                     </td>
-                    <td />
+                    <td colSpan={2} />
                   </tr>
                 </tfoot>
               </table>
@@ -376,7 +382,7 @@ export function PathInventoryDialog({
                     <th>弧度</th>
                     <th>信心度</th>
                     <th>狀態</th>
-                    <th>說明</th>
+                    <th>備註</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -401,7 +407,7 @@ export function PathInventoryDialog({
                             {lightShort(rowLight)}
                           </span>
                         </td>
-                        <td>{noteLabel(tree)}</td>
+                        <td>{measures[tree.Tree_ID]?.note?.trim() || "—"}</td>
                       </tr>
                     );
                   })}
@@ -553,10 +559,10 @@ export function PathInventoryDialog({
                   />
                 </label>
                 <label className="field-measure">
-                  <span className="field-label">現場備註</span>
+                  <span className="field-label">備註</span>
                   <input
                     value={field?.note ?? ""}
-                    placeholder="複核說明…"
+                    placeholder="現場補充、樹況、特殊狀況…"
                     onChange={(event) =>
                       update(preview.Tree_ID, { note: event.target.value })
                     }
@@ -597,7 +603,11 @@ export function PathInventoryDialog({
                     <label className="field-measure">
                       <span className="field-label">
                         樹高 B
-                        <em>公尺，空白則用胸徑粗估</em>
+                        <em>
+                          {carbon.heightEstimated && carbon.heightErrorM != null
+                            ? `空白則胸徑粗估，誤差約 ±${carbon.heightErrorM.toFixed(0)} m`
+                            : "公尺"}
+                        </em>
                       </span>
                       <input
                         inputMode="decimal"
@@ -617,17 +627,16 @@ export function PathInventoryDialog({
                     <label className="field-measure">
                       <span className="field-label">係數 C</span>
                       <select
-                        value={
-                          !field?.coeff || field.coeff === "0.027"
-                            ? "0.027"
-                            : field.coeff === "0.02" || field.coeff === "0.020"
-                              ? "0.02"
-                              : "custom"
-                        }
+                        value={coeffSelectValue(field?.coeff)}
                         onChange={(event) => {
                           const value = event.target.value;
                           update(preview.Tree_ID, {
-                            coeff: value === "custom" ? "0.025" : value,
+                            coeff:
+                              value === "custom"
+                                ? isCustomCoeff(field?.coeff)
+                                  ? field?.coeff ?? ""
+                                  : "0.016"
+                                : value,
                           });
                         }}
                       >
@@ -639,16 +648,13 @@ export function PathInventoryDialog({
                         <option value="custom">自訂</option>
                       </select>
                     </label>
-                    {field?.coeff &&
-                    field.coeff !== "0.027" &&
-                    field.coeff !== "0.02" &&
-                    field.coeff !== "0.020" ? (
+                    {isCustomCoeff(field?.coeff) ? (
                       <label className="field-measure">
                         <span className="field-label">自訂係數</span>
                         <input
                           inputMode="decimal"
-                          value={field.coeff}
-                          placeholder="例如 0.025"
+                          value={field?.coeff ?? ""}
+                          placeholder="0.0159"
                           onChange={(event) =>
                             update(preview.Tree_ID, {
                               coeff: event.target.value,

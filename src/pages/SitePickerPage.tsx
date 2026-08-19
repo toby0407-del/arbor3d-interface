@@ -505,6 +505,7 @@ export function SitePickerPage({ session, onLogout }: Props) {
           recording={recorder.recording}
           overlays={overlays}
           treeMarkers={treeMarkers}
+          selectedTreeId={previewTreeId}
           onPickPark={pickPark}
           onPickPath={pickPath}
           onPickTree={(treeId) => {

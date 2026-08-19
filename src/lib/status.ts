@@ -19,20 +19,19 @@ export function trafficLight(note: string | null | undefined): TrafficLight {
   ) {
     return "red";
   }
-  if (value.includes("not_1.3m")) return "yellow";
   return "green";
 }
 
 export function lightLabel(light: TrafficLight): string {
   if (light === "green") return "演算法較可信";
-  if (light === "yellow") return "有數字，但不是標準 1.3 m";
-  return "卡尺偏寬或量不到，不要當正式樹圍";
+  if (light === "yellow") return "有數字，建議現場核對";
+  return "卡尺偏寬或量不到，現場再量";
 }
 
 export function lightShort(light: TrafficLight): string {
   if (light === "green") return "可信";
-  if (light === "yellow") return "非標準高度";
-  return "勿當正式樹圍";
+  if (light === "yellow") return "需核對";
+  return "需複核";
 }
 
 export function reviewReason(tree: TreeRecord): string {
@@ -44,7 +43,6 @@ export function reviewReason(tree: TreeRecord): string {
   if (tree.arc_coverage_deg != null && tree.arc_coverage_deg < 120) {
     parts.push(`弧度僅 ${tree.arc_coverage_deg.toFixed(1)}°`);
   }
-  if (notes.includes("not_1.3m")) parts.push("不是標準 1.3 m");
   return parts.join(" · ") || "需現場再量";
 }
 
