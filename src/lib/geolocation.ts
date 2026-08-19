@@ -2,12 +2,12 @@
  * 快速可靠定位：
  * 1) 先用快取（幾乎瞬間，誤差須 ≤ 400 m）
  * 2) Wi‑Fi／網路（同樣須夠準）
- * 3) 不夠準才短試 GPS；仍不夠準則回傳最佳結果，由地圖決定不飛過去
+ * 3) 不夠準才短試 GPS；仍不夠準就不採用，地圖留在原處
  */
 
-/** 誤差超過這個距離就不把地圖移過去（擋掉 10 萬公尺那種 IP 定位） */
+/** 誤差超過這個距離就不把地圖移過去（擋掉縣市級 IP／Wi‑Fi 粗定位） */
 export const MAX_ACCEPTABLE_ACCURACY_M = 400;
-export const MAX_FLY_ACCURACY_M = 10_000;
+export const MAX_FLY_ACCURACY_M = 400;
 
 export type GeoResult = {
   lat: number;
@@ -41,17 +41,35 @@ function haversineMeters(
   return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
 }
 
-/** 丟掉 IP 粗定位，也避免已經在逢甲又被拉去幾十公里外的埔里。 */
+/**
+ * IP 資料庫常把「台灣」標在埔里（地理中心）。
+ * 精度普通時幾乎一定不是真實 GPS。
+ */
+const PULI_IP_FALLBACK: [number, number] = [23.973875, 120.967037];
+
+export function looksLikeTaiwanIpFallback(
+  lat: number,
+  lng: number,
+  accuracy: number,
+): boolean {
+  if (!Number.isFinite(accuracy) || accuracy <= 50) return false;
+  return (
+    haversineMeters(lat, lng, PULI_IP_FALLBACK[0], PULI_IP_FALLBACK[1]) < 20_000
+  );
+}
+
+/** 丟掉 IP 粗定位，也避免已經在逢甲又被拉去幾十公里外。 */
 export function shouldAcceptGeoFix(
   next: { lat: number; lng: number; accuracy: number },
   prev: { lat: number; lng: number; accuracy: number } | null,
 ): boolean {
   if (!Number.isFinite(next.lat) || !Number.isFinite(next.lng)) return false;
-  if (!isFlyableAccuracy(next.accuracy)) return false;
+  if (!isUsableAccuracy(next.accuracy)) return false;
+  if (looksLikeTaiwanIpFallback(next.lat, next.lng, next.accuracy)) return false;
   if (!prev) return true;
   const moved = haversineMeters(prev.lat, prev.lng, next.lat, next.lng);
-  if (moved > 1_500 && next.accuracy > prev.accuracy) return false;
-  if (moved > 1_500 && next.accuracy > 2_000) return false;
+  if (moved > 800 && next.accuracy > prev.accuracy) return false;
+  if (moved > 1_500) return false;
   return true;
 }
 
@@ -242,7 +260,7 @@ export async function getBestPosition(
     const hit = take(cached, false);
     if (hit) return hit;
     const cachedBest = best as GeolocationPosition | null;
-    if (cachedBest && isFlyableAccuracy(cachedBest.coords.accuracy)) {
+    if (cachedBest && isUsableAccuracy(cachedBest.coords.accuracy)) {
       return toResult(cachedBest, bestHigh);
     }
   } catch (err) {
@@ -260,7 +278,7 @@ export async function getBestPosition(
     const hit = take(coarse, false);
     if (hit) return hit;
     const coarseBest = best as GeolocationPosition | null;
-    if (coarseBest && isFlyableAccuracy(coarseBest.coords.accuracy)) {
+    if (coarseBest && isUsableAccuracy(coarseBest.coords.accuracy)) {
       return toResult(coarseBest, bestHigh);
     }
   } catch (err) {
@@ -299,7 +317,9 @@ export async function getBestPosition(
     if ((err as GeolocationPositionError)?.code === 1) throw err;
   }
 
-  if (best) return toResult(best, bestHigh);
+  if (best && isUsableAccuracy(best.coords.accuracy)) {
+    return toResult(best, bestHigh);
+  }
   throw timeoutError();
 }
 

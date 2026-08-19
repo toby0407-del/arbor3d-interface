@@ -7,9 +7,11 @@ export type TreeRecord = {
   DBH_note: string;
   arc_coverage_deg: number | null;
   dbh_is_strict_breast_height: boolean;
+  Height_m?: number | null;
   GPS_Location: [number, number] | null;
   Local_XYZ_m: [number, number, number];
   Best_Photo: string | null;
+  PointCloud_Preview?: string | null;
   Mask_Path: string | null;
   Cross_Section_Image: string | null;
   "3D_Model_Path": string | null;

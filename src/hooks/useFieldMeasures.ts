@@ -3,6 +3,9 @@ import { useCallback, useState } from "react";
 export type FieldMeasure = {
   dbhCm: string;
   note: string;
+  heightM: string;
+  coeff: string;
+  measuredAt: string;
 };
 
 type Store = Record<string, FieldMeasure>;
@@ -37,6 +40,9 @@ export function useFieldMeasures(scanId: string) {
           [treeId]: {
             dbhCm: prev[treeId]?.dbhCm ?? "",
             note: prev[treeId]?.note ?? "",
+            heightM: prev[treeId]?.heightM ?? "",
+            coeff: prev[treeId]?.coeff ?? "",
+            measuredAt: prev[treeId]?.measuredAt ?? "",
             ...patch,
           },
         };

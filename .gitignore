@@ -36,3 +36,6 @@ src/data/taichung_sites.json
 inbox/**
 !inbox/.gitkeep
 public/scans/**/_inbox_staged/
+public/scans/_bindings.json
+# Scene-wide Gaussian PLY is typically >100MB (GitHub limit)
+public/scans/**/scene_gaussian.ply

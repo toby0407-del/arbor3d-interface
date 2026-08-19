@@ -1,3 +1,4 @@
+import { carbonForTree } from "./carbon";
 import { methodLabel } from "./format";
 import { lightShort, noteLabel, trafficLight } from "./status";
 import type { FieldMeasure } from "../hooks/useFieldMeasures";
@@ -12,6 +13,7 @@ function cell(value: string | number | null | undefined): string {
 export function inventoryToCsv(
   trees: TreeRecord[],
   measures: Record<string, FieldMeasure>,
+  scanCreatedAt = "",
 ): string {
   const header = [
     "樹號",
@@ -24,9 +26,16 @@ export function inventoryToCsv(
     "標準1.3m",
     "現場手測_cm",
     "現場備註",
+    "高度1.3m處圓周_m",
+    "樹高_m",
+    "係數",
+    "樹含碳量_D",
+    "吸收CO2當量_ton",
+    "測量日期",
   ];
   const rows = trees.map((tree) => {
     const field = measures[tree.Tree_ID];
+    const carbon = carbonForTree(tree, field, scanCreatedAt);
     return [
       tree.Tree_ID,
       tree.DBH_cm ?? "",
@@ -38,6 +47,12 @@ export function inventoryToCsv(
       tree.dbh_is_strict_breast_height ? "是" : "否",
       field?.dbhCm ?? "",
       field?.note ?? "",
+      carbon.circumferenceM?.toFixed(3) ?? "",
+      carbon.heightM?.toFixed(1) ?? "",
+      carbon.coeff,
+      carbon.carbonD?.toFixed(4) ?? "",
+      carbon.co2Ton?.toFixed(3) ?? "",
+      carbon.measuredAt,
     ]
       .map(cell)
       .join(",");
@@ -49,8 +64,9 @@ export function downloadInventoryCsv(
   trees: TreeRecord[],
   measures: Record<string, FieldMeasure>,
   filename: string,
+  scanCreatedAt = "",
 ) {
-  const blob = new Blob([inventoryToCsv(trees, measures)], {
+  const blob = new Blob([inventoryToCsv(trees, measures, scanCreatedAt)], {
     type: "text/csv;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);

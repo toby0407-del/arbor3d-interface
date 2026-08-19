@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BrandMark } from "../components/BrandMark";
 import { ColorLegend } from "../components/ColorLegend";
 import { OsmSiteMap } from "../components/OsmSiteMap";
@@ -21,8 +21,10 @@ import {
   upsertOverlay,
   type MapOverlay,
 } from "../lib/mapOverlays";
+import { fetchInventories } from "../lib/importApi";
 import { treesAlongPolyline } from "../lib/treePlacement";
 import type { Session } from "../lib/session";
+import type { ParkInventoryReport } from "../types";
 import { PathImportDialog } from "./PathImportDialog";
 import { PathInventoryDialog } from "./PathInventoryDialog";
 
@@ -33,6 +35,26 @@ type Props = {
 
 type KindFilter = "all" | SiteKind;
 type Notice = { tone: "ok" | "err"; text: string };
+
+function withLiveInventory(
+  site: ParkSite,
+  binds: Record<string, string>,
+  reports: Record<string, ParkInventoryReport>,
+): ParkSite {
+  return {
+    ...site,
+    paths: site.paths.map((path) => {
+      const scan = binds[path.id] || path.scanId;
+      const ready = Boolean(scan && (reports[scan] || getReport(scan)));
+      return {
+        ...path,
+        scanId: ready ? scan : path.scanId,
+        scanIds: ready && scan ? [scan] : path.scanIds,
+        hasInventory: ready,
+      };
+    }),
+  };
+}
 
 export function SitePickerPage({ session, onLogout }: Props) {
   const [parkId, setParkId] = useState<string | null>(null);
@@ -45,10 +67,25 @@ export function SitePickerPage({ session, onLogout }: Props) {
   const [showImport, setShowImport] = useState(false);
   const [previewTreeId, setPreviewTreeId] = useState<string | null>(null);
   const [overlays, setOverlays] = useState<MapOverlay[]>(() => readOverlays());
+  const [liveReports, setLiveReports] = useState<Record<string, ParkInventoryReport>>({});
+  const [liveBinds, setLiveBinds] = useState<Record<string, string>>({});
   const recorder = usePathRecorder();
 
+  useEffect(() => {
+    void fetchInventories()
+      .then((data) => {
+        setLiveReports(data.reports);
+        setLiveBinds(data.bindings);
+      })
+      .catch(() => {
+        /* 本機尚未計算過 */
+      });
+  }, []);
+
   const filtered = useMemo(() => {
-    const rows = searchSites(query, kind);
+    const rows = searchSites(query, kind).map((site) =>
+      withLiveInventory(site, liveBinds, liveReports),
+    );
     if (query.trim()) return rows;
     return [...rows].sort((a, b) => {
       const ia = siteHasInventory(a) ? 0 : 1;
@@ -59,12 +96,20 @@ export function SitePickerPage({ session, onLogout }: Props) {
       const db = haversineMeters(userPos[0], userPos[1], b.center[0], b.center[1]);
       return da - db;
     });
-  }, [query, kind, userPos]);
+  }, [query, kind, userPos, liveBinds, liveReports]);
 
-  const park = parkId ? findPark(parkId) : undefined;
-  const path = parkId && pathId ? findPath(parkId, pathId) : undefined;
-  const pathReport =
-    path?.hasInventory && path.scanId ? getReport(path.scanId) : undefined;
+  const park = useMemo(() => {
+    if (!parkId) return undefined;
+    const found = findPark(parkId);
+    if (!found) return undefined;
+    return withLiveInventory(found, liveBinds, liveReports);
+  }, [parkId, liveBinds, liveReports]);
+  const path = park?.paths.find((item) => item.id === pathId);
+  const boundScanId = pathId ? liveBinds[pathId] || path?.scanId || null : null;
+  const pathReport = boundScanId
+    ? liveReports[boundScanId] || getReport(boundScanId)
+    : undefined;
+  const pathReady = Boolean(pathReport);
   const liveTrack = useMemo(() => toLatLngs(recorder.points), [recorder.points]);
   const treeMarkers = useMemo(() => {
     if (!path?.polyline || !pathReport) return [];
@@ -94,9 +139,10 @@ export function SitePickerPage({ session, onLogout }: Props) {
     const found = findPath(nextParkId, nextPathId);
     if (!found) return;
     setNotice(null);
-    if (found.hasInventory && found.scanId) {
-      const report = getReport(found.scanId);
-      setPreviewTreeId(report?.trees[0]?.Tree_ID ?? null);
+    const scan = liveBinds[nextPathId] || found.scanId;
+    const report = scan ? liveReports[scan] || getReport(scan) : undefined;
+    if (report) {
+      setPreviewTreeId(report.trees[0]?.Tree_ID ?? null);
       setShowPathDb(true);
       setShowImport(false);
     } else {
@@ -174,15 +220,22 @@ export function SitePickerPage({ session, onLogout }: Props) {
       setOverlays(upsertOverlay(overlay));
       setNotice({
         tone: "ok",
-        text: `已標記 ${info.year} 年路段「${info.label}」。`,
+        text: `已上傳 ${info.year} 年「${info.label}」。請按「開始計算」產生樹身分。`,
       });
     }
-    const report = getReport(info.scanId);
-    if (report) {
-      setPreviewTreeId(report.trees[0]?.Tree_ID ?? null);
-      setShowImport(false);
-      setShowPathDb(true);
-    }
+  };
+
+  const onComputed = (report: ParkInventoryReport) => {
+    if (!pathId) return;
+    setLiveReports((prev) => ({ ...prev, [report.scan_id]: report }));
+    setLiveBinds((prev) => ({ ...prev, [pathId]: report.scan_id }));
+    setPreviewTreeId(report.trees[0]?.Tree_ID ?? null);
+    setShowImport(false);
+    setShowPathDb(true);
+    setNotice({
+      tone: "ok",
+      text: `已算出 ${report.num_trees} 棵樹身分。`,
+    });
   };
 
   return (
@@ -290,7 +343,12 @@ export function SitePickerPage({ session, onLogout }: Props) {
             <>
               <h2>路徑</h2>
               <ul className="picker-list">
-                {park.paths.map((item) => (
+                {park.paths.map((item) => {
+                  const scan = liveBinds[item.id] || item.scanId;
+                  const ready = Boolean(
+                    scan && (liveReports[scan] || getReport(scan)),
+                  );
+                  return (
                   <li key={item.id}>
                     <div className={`path-row ${pathId === item.id ? "is-active" : ""}`}>
                       <button
@@ -298,10 +356,17 @@ export function SitePickerPage({ session, onLogout }: Props) {
                         className="picker-item"
                         onClick={() => pickPath(park.id, item.id)}
                       >
-                        <strong>{item.name}</strong>
+                        <strong>
+                          {item.name}
+                          {ready ? (
+                            <span className="ready-badge">已盤點</span>
+                          ) : (
+                            <span className="pending-badge">尚未匯入</span>
+                          )}
+                        </strong>
                         <span>
-                          {item.hasInventory
-                            ? `掃描 ${item.scanId} · 點此查看盤點`
+                          {ready
+                            ? `掃描 ${scan} · 點此查看盤點`
                             : "尚無盤點 · 點此匯入"}
                         </span>
                       </button>
@@ -319,7 +384,8 @@ export function SitePickerPage({ session, onLogout }: Props) {
                       </button>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </>
           ) : null}
@@ -456,9 +522,11 @@ export function SitePickerPage({ session, onLogout }: Props) {
         <PathImportDialog
           parkName={park.name}
           pathName={path.name}
-          hasInventory={Boolean(path.hasInventory && pathReport)}
+          pathId={path.id}
+          hasInventory={pathReady}
           onClose={() => setShowImport(false)}
           onImported={onImported}
+          onComputed={onComputed}
           onOpenInventory={() => {
             setShowImport(false);
             setShowPathDb(true);

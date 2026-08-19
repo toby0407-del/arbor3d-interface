@@ -32,7 +32,7 @@ export function formatArc(deg: number | null | undefined): string {
 
 export function breastHeightLabel(strict: boolean | null | undefined): string {
   if (strict == null) return "—";
-  return strict ? "標準 1.3 m" : "非 1.3 m";
+  return strict ? "標準 1.3 m" : "非標準高度";
 }
 
 export function formatScanTime(iso: string): string {

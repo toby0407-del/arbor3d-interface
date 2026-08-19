@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
 import {
+  computeImportJob,
   createImportJob,
   defaultScanId,
   fetchImportJob,
-  rerunImportJob,
   type FolderSlot,
   type ImportJob,
 } from "../lib/importApi";
+import type { ParkInventoryReport } from "../types";
 
 const folderInputProps = {
   webkitdirectory: "",
@@ -43,14 +44,8 @@ const SLOTS: {
   {
     key: "rawGo",
     kind: "folder",
-    title: "原始／去程照片",
-    hint: "同一趟影像，或左鏡頭／走過去的資料夾",
-  },
-  {
-    key: "rawReturn",
-    kind: "folder",
-    title: "回程照片（選填）",
-    hint: "有走回來或右鏡頭再選；單趟可留空",
+    title: "原始照片",
+    hint: "這一趟訓練用的那包影像（一個資料夾即可）",
   },
 ];
 
@@ -157,7 +152,7 @@ function stageStatusLabel(status: string) {
 
 function jobStatusLabel(status: string) {
   if (status === "receiving") return "接收中";
-  if (status === "queued") return "排隊中";
+  if (status === "queued") return "待計算";
   if (status === "running") return "處理中";
   if (status === "done") return "完成";
   if (status === "error") return "失敗";
@@ -165,10 +160,7 @@ function jobStatusLabel(status: string) {
 }
 
 function resolveSegmentLabel(slots: Record<FolderSlot, SlotState>): string {
-  const go = slots.rawGo.rootLabel;
-  const back = slots.rawReturn.rootLabel;
-  if (go && back) return `${go}＋${back}`;
-  return go || back || "未命名路段";
+  return slots.rawGo.rootLabel || "未命名路段";
 }
 
 function folderNameToScanId(folderName: string): string {
@@ -179,6 +171,14 @@ function folderNameToScanId(folderName: string): string {
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "");
   return cleaned || defaultScanId();
+}
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  if (n < 1024) return `${Math.round(n)} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function yearOptions(now = new Date().getFullYear()): number[] {
@@ -214,7 +214,7 @@ function validateAll(slots: Record<FolderSlot, SlotState>): string | null {
     return slots.gaussian.formatMsg || "請上傳高斯濺射 .ply";
   }
   if (!slots.rawGo.formatOk) {
-    return slots.rawGo.formatMsg || "請選擇原始／去程照片資料夾";
+    return slots.rawGo.formatMsg || "請選擇原始照片資料夾";
   }
   return null;
 }
@@ -222,18 +222,22 @@ function validateAll(slots: Record<FolderSlot, SlotState>): string | null {
 type Props = {
   parkName: string;
   pathName: string;
+  pathId: string;
   hasInventory: boolean;
   onClose: () => void;
   onImported: (info: { label: string; scanId: string; year: number }) => void;
+  onComputed?: (report: ParkInventoryReport) => void;
   onOpenInventory?: () => void;
 };
 
 export function PathImportDialog({
   parkName,
   pathName,
+  pathId,
   hasInventory,
   onClose,
   onImported,
+  onComputed,
   onOpenInventory,
 }: Props) {
   const [year, setYear] = useState(readLastYear);
@@ -241,6 +245,9 @@ export function PathImportDialog({
   const [note, setNote] = useState("");
   const [slots, setSlots] = useState(emptySlots);
   const [busy, setBusy] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadLoaded, setUploadLoaded] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
   const [error, setError] = useState("");
   const [job, setJob] = useState<ImportJob | null>(null);
   const folderLabel = resolveSegmentLabel(slots);
@@ -250,6 +257,7 @@ export function PathImportDialog({
     ? folderNameToScanId(slots.rawGo.rootLabel)
     : "";
   const lastDerived = useRef("");
+  const openedReport = useRef("");
   const formatError = validateAll(slots);
 
   useEffect(() => {
@@ -271,6 +279,14 @@ export function PathImportDialog({
     }, 1200);
     return () => window.clearInterval(timer);
   }, [job]);
+
+  useEffect(() => {
+    const report = job?.report;
+    if (job?.status !== "done" || !report?.trees?.length || !onComputed) return;
+    if (openedReport.current === `${job.id}:${report.scan_id}:${report.num_trees}`) return;
+    openedReport.current = `${job.id}:${report.scan_id}:${report.num_trees}`;
+    onComputed(report);
+  }, [job, onComputed]);
 
   const ready =
     !formatError &&
@@ -298,11 +314,16 @@ export function PathImportDialog({
     }
     if (!ready || busy) return;
     setBusy(true);
+    setUploadPct(0);
+    setUploadLoaded(0);
+    setUploadTotal(0);
     setError("");
     writeLastYear(year);
     try {
       const next = await createImportJob({
         scanId: scanId.trim(),
+        parkName,
+        pathId,
         note:
           note.trim() ||
           `${year} / ${parkName} / ${pathName} / ${folderLabel}`,
@@ -310,9 +331,15 @@ export function PathImportDialog({
           denoised: slots.denoised.files,
           gaussian: slots.gaussian.files,
           rawGo: slots.rawGo.files,
-          rawReturn: slots.rawReturn.files,
+          rawReturn: [],
+        },
+        onProgress: (progress) => {
+          setUploadLoaded(progress.loaded);
+          setUploadTotal(progress.total);
+          setUploadPct(progress.percent);
         },
       });
+      setUploadPct(100);
       setJob(next);
       onImported({ label: segmentLabel, scanId: next.scanId, year });
     } catch (err) {
@@ -322,8 +349,32 @@ export function PathImportDialog({
     }
   };
 
+  const computing = job?.status === "running";
+  const canCompute =
+    Boolean(job) &&
+    !busy &&
+    (job?.status === "queued" || job?.status === "done" || job?.status === "error");
+
+  const startCompute = async () => {
+    if (!job || busy || computing) return;
+    setError("");
+    openedReport.current = "";
+    try {
+      const next = await computeImportJob(job.id);
+      setJob(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "無法開始計算");
+    }
+  };
+
   return (
-    <div className="path-db-backdrop" role="presentation" onClick={onClose}>
+    <div
+      className="path-db-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!busy && !computing) onClose();
+      }}
+    >
       <div
         className="path-db-panel is-wide import-dialog"
         role="dialog"
@@ -336,7 +387,7 @@ export function PathImportDialog({
             <p className="path-db-kicker">{parkName}</p>
             <h2 id="path-import-title">匯入 · {pathName}</h2>
             <p>
-              上兩項為去噪與高斯濺射 .ply；照片可只選同一趟，回程／另一側鏡頭選填。標記：
+              三項即可：去噪 .ply、高斯濺射 .ply、這一趟的照片資料夾。上傳完成後再按「開始計算」才會出樹身分。標記：
               <strong> {segmentLabel || "—"}</strong>
             </p>
           </div>
@@ -346,7 +397,7 @@ export function PathImportDialog({
                 查看已有盤點
               </button>
             ) : null}
-            <button type="button" className="ghost-btn" onClick={onClose}>
+            <button type="button" className="ghost-btn" onClick={onClose} disabled={busy || computing}>
               關閉
             </button>
           </div>
@@ -384,7 +435,7 @@ export function PathImportDialog({
                 <input
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="去程／回程、左鏡頭…"
+                  placeholder="鏡頭、路段備註…"
                   disabled={busy}
                 />
               </label>
@@ -397,6 +448,8 @@ export function PathImportDialog({
                   <label
                     key={slot.key}
                     className={`import-slot ${
+                      slot.kind === "folder" ? "is-wide" : ""
+                    } ${
                       state.files.length
                         ? state.formatOk
                           ? "is-ok"
@@ -447,13 +500,57 @@ export function PathImportDialog({
               disabled={!ready || busy}
               onClick={() => void start()}
             >
-              {busy ? "上傳中…" : `上傳 ${year} 年並開始後續處理`}
+              {busy
+                ? uploadPct >= 100
+                  ? "上傳完成，正在處理…"
+                  : `上傳中… ${uploadPct}%`
+                : `上傳 ${year} 年並開始後續處理`}
             </button>
+            {busy ? (
+              <div
+                className={`import-upload-bar ${uploadTotal <= 0 ? "is-indeterminate" : ""}`}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={uploadTotal > 0 ? uploadPct : undefined}
+                aria-label="上傳進度"
+              >
+                <div
+                  className="import-upload-bar-fill"
+                  style={
+                    uploadTotal > 0 ? { width: `${Math.max(2, uploadPct)}%` } : undefined
+                  }
+                />
+                <span className="import-upload-bar-label">
+                  {uploadTotal > 0
+                    ? `${formatBytes(uploadLoaded)} / ${formatBytes(uploadTotal)} · ${uploadPct}%`
+                    : "正在傳送檔案…"}
+                </span>
+              </div>
+            ) : null}
+            {canCompute ? (
+              <button
+                type="button"
+                className="primary-btn import-start"
+                disabled={computing}
+                onClick={() => void startCompute()}
+              >
+                {job?.status === "done" ? "重新計算樹身分" : "開始計算"}
+              </button>
+            ) : null}
+            {computing ? (
+              <div className="import-upload-bar is-indeterminate" role="progressbar" aria-label="計算進度">
+                <div className="import-upload-bar-fill" />
+                <span className="import-upload-bar-label">正在計算樹身分…</span>
+              </div>
+            ) : null}
           </section>
 
           <section className="import-panel import-progress">
             <h2>處理進度</h2>
-            {!job ? (
+            {!job && busy ? (
+              <p className="empty">檔案上傳中，請勿關閉視窗。</p>
+            ) : !job ? (
               <p className="empty">格式通過並上傳後會顯示階段與日誌。</p>
             ) : (
               <>
@@ -480,19 +577,21 @@ export function PathImportDialog({
                     <div key={`${i}-${line}`}>{line}</div>
                   ))}
                 </div>
-                {(job.status === "done" || job.status === "error") && (
+                {(job.status === "queued" || job.status === "done" || job.status === "error") && (
                   <button
                     type="button"
-                    className="ghost-btn"
-                    onClick={() => {
-                      void rerunImportJob(job.id).then(setJob).catch((err) => {
-                        setError(err instanceof Error ? err.message : "重跑失敗");
-                      });
-                    }}
+                    className="primary-btn"
+                    disabled={computing}
+                    onClick={() => void startCompute()}
                   >
-                    重跑後續處理
+                    {job.status === "queued" ? "開始計算" : "重新計算樹身分"}
                   </button>
                 )}
+                {job.status === "done" && job.report && onOpenInventory ? (
+                  <button type="button" className="ghost-btn" onClick={onOpenInventory}>
+                    查看樹身分
+                  </button>
+                ) : null}
               </>
             )}
           </section>

@@ -51,6 +51,14 @@ function focusBounds(site: ParkSite, pathId: string | null): L.LatLngBounds {
   if (path && path.polyline.length >= 2) {
     return L.latLngBounds(path.polyline);
   }
+  const drawn = site.paths.filter((item) => item.polyline.length >= 2);
+  if (drawn.length > 0) {
+    const bounds = L.latLngBounds(drawn[0].polyline);
+    for (const item of drawn.slice(1)) {
+      bounds.extend(L.latLngBounds(item.polyline));
+    }
+    return bounds.pad(0.35);
+  }
   return L.latLng(site.center[0], site.center[1]).toBounds(350);
 }
 
@@ -209,7 +217,7 @@ export function OsmSiteMap({
       center: [c.lat, c.lng],
       zoom,
       basemap: basemapModeRef.current,
-      userPos: userPosRef.current,
+      userPos: liveFixRef.current ? userPosRef.current : null,
       focusKey: lastFocusKey.current,
       bootDone: true,
     });
@@ -351,6 +359,10 @@ export function OsmSiteMap({
             prev,
           )
         ) {
+          if (pendingFlyRef.current && !haveGoodFixRef.current) {
+            setBootLocating(false);
+            setLocateNote("目前定位不夠精準，未移動地圖。請開系統定位後再按「快速定位」。");
+          }
           return;
         }
         lastAccuracyRef.current = next.coords.accuracy;
@@ -376,6 +388,7 @@ export function OsmSiteMap({
         if (followingRef.current) panFollowUser(point);
       },
       (err) => {
+        if (err.code === 3) return;
         setLocating(false);
         setBootLocating(false);
         if (!haveGoodFixRef.current) {
@@ -453,7 +466,6 @@ export function OsmSiteMap({
     const saved = readMapView();
     const startCenter = saved?.center ?? TAIWAN_CENTER;
     const startZoom = saved?.zoom ?? TAIWAN_DEFAULT_ZOOM;
-    if (saved?.focusKey) lastFocusKey.current = saved.focusKey;
 
     const map = L.map(host, {
       zoomControl: true,
@@ -479,26 +491,6 @@ export function OsmSiteMap({
     userLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
     applyTaiwanLock(map);
-
-    if (saved?.userPos) {
-      userPosRef.current = saved.userPos;
-      // drawUser 在下方 effect 就緒後由還原流程呼叫；此處先畫點
-      L.circle(saved.userPos, {
-        radius: 25,
-        color: "#1e90ff",
-        weight: 2,
-        fillColor: "#1e90ff",
-        fillOpacity: 0.15,
-      }).addTo(userLayerRef.current);
-      L.marker(saved.userPos, { icon: userPin(), zIndexOffset: 1000 })
-        .bindTooltip("我的位置", {
-          permanent: true,
-          direction: "right",
-          className: "osm-user-tip",
-        })
-        .addTo(userLayerRef.current);
-      callbacks.current.onUserPosition?.(saved.userPos);
-    }
 
     let redrawTimer = 0;
     let persistTimer = 0;
@@ -632,21 +624,28 @@ export function OsmSiteMap({
         layers.addLayer(marker);
       }
 
-      // 已盤點路線：未選中也畫出來；選中時加粗
+      // 已綁定的路線都畫出來（含尚未匯入），不要只在選中公園時才出現
       for (const path of site.paths) {
         if (path.polyline.length < 2) continue;
-        if (!path.hasInventory && !active) continue;
         const pathActive = active && path.id === pathId;
+        const pending = !path.hasInventory;
         const line = L.polyline(path.polyline, {
-          color: path.hasInventory ? "#ff8a00" : "#f0c14b",
-          weight: pathActive ? 9 : path.hasInventory ? 6 : 5,
-          opacity: pathActive ? 1 : 0.9,
-          dashArray: path.hasInventory ? undefined : "8 8",
+          color: pending ? "#2a6f97" : "#ff8a00",
+          weight: pathActive ? 10 : pending ? 7 : 6,
+          opacity: pathActive ? 1 : 0.95,
+          dashArray: pending ? "10 8" : undefined,
         });
         line.bindTooltip(
-          path.hasInventory
-            ? `${path.name}（已盤點 · ${path.scanId}）`
-            : path.name,
+          pending
+            ? `${path.name}（尚未匯入）`
+            : `${path.name}（已盤點 · ${path.scanId}）`,
+          pending
+            ? {
+                permanent: true,
+                direction: "center",
+                className: "osm-overlay-tip",
+              }
+            : undefined,
         );
         line.on("click", () => callbacks.current.onPickPath(site.id, path.id));
         layers.addLayer(line);
@@ -690,7 +689,7 @@ export function OsmSiteMap({
         icon: treePin(tree.light),
         zIndexOffset: 700,
       });
-      marker.bindTooltip(tree.id, { direction: "top", offset: [0, -8] });
+      marker.bindTooltip("點擊查看", { direction: "top", offset: [0, -8] });
       marker.on("click", () => callbacks.current.onPickTree?.(tree.id));
       layer.addLayer(marker);
     }
@@ -723,6 +722,9 @@ export function OsmSiteMap({
     const focusKey = `${selectedSite.id}:${selectedPathId ?? ""}`;
     if (focusKey === lastFocusKey.current) return;
     lastFocusKey.current = focusKey;
+    followingRef.current = false;
+    setFollowing(false);
+    pendingFlyRef.current = false;
 
     const size = map.getSize();
     const padX = Math.max(40, Math.round(size.x * 0.25));

@@ -2,8 +2,9 @@
 export function scanAssetUrl(
   scanId: string | null | undefined,
   relative: string | null | undefined,
+  cacheBust = "",
 ): string | null {
   if (!scanId || !relative) return null;
   const clean = relative.replace(/^\.?\//, "");
-  return `/scans/${scanId}/${clean}`;
+  return `/scans/${scanId}/${clean}${cacheBust}`;
 }

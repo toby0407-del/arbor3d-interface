@@ -18,12 +18,16 @@ export type ImportJob = {
   id: string;
   scanId: string;
   note: string;
+  parkName: string;
+  pathId: string;
   status: "receiving" | "queued" | "running" | "done" | "error";
   message: string;
   stages: JobStage[];
   logs: string[];
   createdAt: string;
   updatedAt: string;
+  treeCount: number | null;
+  report: unknown | null;
   fileCounts: {
     denoised: number;
     gaussian: number;
@@ -35,7 +39,7 @@ export type ImportJob = {
 const SLOT_LABELS = {
   denoised: "去噪 PLY",
   gaussian: "高斯濺射 PLY",
-  rawGo: "去程照片",
+  rawGo: "原始照片",
   rawReturn: "回程照片",
 } as const;
 
@@ -59,8 +63,8 @@ function defaultStages(): JobStage[] {
     { id: "receive", label: "接收上傳", status: "pending" },
     { id: "denoised", label: "確認去噪 PLY", status: "pending" },
     { id: "gaussian", label: "確認高斯濺射 PLY", status: "pending" },
-    { id: "raw", label: "確認去程／回程照片", status: "pending" },
-    { id: "measure", label: "後續量測處理", status: "pending" },
+    { id: "raw", label: "確認原始照片", status: "pending" },
+    { id: "measure", label: "計算樹身分", status: "pending" },
     { id: "publish", label: "整理輸出", status: "pending" },
   ];
 }
@@ -111,22 +115,65 @@ export function importApiPlugin(projectRoot: string): Plugin {
     );
   }
 
+  async function loadBindings(): Promise<Record<string, string>> {
+    try {
+      const raw = await fsp.readFile(
+        path.join(projectRoot, "public", "scans", "_bindings.json"),
+        "utf8",
+      );
+      return JSON.parse(raw) as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
+  async function loadInventory(scanId: string) {
+    const candidates = [
+      path.join(projectRoot, "public", "scans", scanId, "inventory.json"),
+      path.join(inboxRoot, `job-${scanId}`, "inventory.json"),
+    ];
+    for (const file of candidates) {
+      try {
+        return JSON.parse(await fsp.readFile(file, "utf8"));
+      } catch {
+        /* try next */
+      }
+    }
+    const dirs = await fsp.readdir(inboxRoot).catch(() => []);
+    for (const id of dirs) {
+      try {
+        const raw = await fsp.readFile(path.join(inboxRoot, id, "inventory.json"), "utf8");
+        const report = JSON.parse(raw) as { scan_id?: string };
+        if (report.scan_id === scanId) return report;
+      } catch {
+        /* skip */
+      }
+    }
+    return null;
+  }
+
   async function runPipeline(job: ImportJob) {
     job.status = "running";
-    job.message = "正在跑後續量測…";
+    job.message = "正在計算樹身分…";
+    job.report = null;
     setStage(job, "measure", "running");
-    pushLog(job, "啟動後續處理腳本");
+    setStage(job, "publish", "pending");
+    pushLog(job, "開始從去噪點雲計算樹身分");
     await persistJob(job);
 
-    const script = path.join(projectRoot, "scripts", "run-postprocess.mjs");
+    const script = path.join(projectRoot, "scripts", "compute-inventory.mjs");
     const dir = jobDir(job);
 
     await new Promise<void>((resolve) => {
-      const child = spawn(process.execPath, [script, dir, job.scanId], {
-        cwd: projectRoot,
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      const child = spawn(
+        process.execPath,
+        [script, dir, job.scanId, job.pathId].filter(Boolean),
+        {
+          cwd: projectRoot,
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
 
       const onChunk = (buf: Buffer) => {
         const text = buf.toString("utf8").trim();
@@ -141,24 +188,29 @@ export function importApiPlugin(projectRoot: string): Plugin {
       child.on("close", async (code) => {
         try {
           const statusPath = path.join(dir, "pipeline-status.json");
-          let pendingPipeline = false;
+          let statusMessage = "";
           try {
             const raw = await fsp.readFile(statusPath, "utf8");
             const parsed = JSON.parse(raw) as { status?: string; message?: string };
-            pendingPipeline = parsed.status === "pending_pipeline";
-            if (parsed.message) job.message = parsed.message;
+            if (parsed.message) statusMessage = parsed.message;
           } catch {
             /* no status file */
           }
 
           if (code === 0) {
+            const report = (await loadInventory(job.scanId)) as {
+              num_trees?: number;
+              trees?: unknown[];
+            } | null;
+            job.report = report;
+            job.treeCount = report?.num_trees ?? report?.trees?.length ?? null;
             setStage(job, "measure", "done");
             setStage(job, "publish", "done");
             job.status = "done";
-            if (!pendingPipeline) {
-              job.message = "處理完成。請確認 inventories 與 public/scans。";
-            }
-            pushLog(job, pendingPipeline ? "收檔完成（待接 ARBOR3D 管線）" : "處理完成");
+            job.message = job.treeCount
+              ? `已算出 ${job.treeCount} 棵樹身分，可查看盤點。`
+              : statusMessage || "計算完成。";
+            pushLog(job, job.message);
           } else {
             setStage(job, "measure", "error");
             job.status = "error";
@@ -188,12 +240,16 @@ export function importApiPlugin(projectRoot: string): Plugin {
       id,
       scanId: makeScanId(),
       note: "",
+      parkName: "",
+      pathId: "",
       status: "receiving",
       message: "上傳中…",
       stages: defaultStages(),
       logs: [],
       createdAt: nowIso(),
       updatedAt: nowIso(),
+      treeCount: null,
+      report: null,
       fileCounts: { rawGo: 0, rawReturn: 0, denoised: 0, gaussian: 0 },
     };
     jobs.set(id, job);
@@ -222,6 +278,8 @@ export function importApiPlugin(projectRoot: string): Plugin {
       busboy.on("field", (name, value) => {
         if (name === "scanId" && value.trim()) job.scanId = value.trim();
         if (name === "note") job.note = value;
+        if (name === "parkName") job.parkName = value.trim();
+        if (name === "pathId") job.pathId = value.trim();
       });
 
       busboy.on("file", (name, stream, info) => {
@@ -278,10 +336,8 @@ export function importApiPlugin(projectRoot: string): Plugin {
     pushLog(
       job,
       rawOk
-        ? job.fileCounts.rawReturn > 0
-          ? `照片 去程／單趟 ${job.fileCounts.rawGo} 檔、回程 ${job.fileCounts.rawReturn} 檔`
-          : `照片單趟 ${job.fileCounts.rawGo} 檔（未上傳回程）`
-        : `照片資料夾不足（去程 ${job.fileCounts.rawGo}）`,
+        ? `原始照片 ${job.fileCounts.rawGo} 檔`
+        : "原始照片資料夾未上傳",
     );
 
     const missingLabels: string[] = [];
@@ -331,11 +387,10 @@ export function importApiPlugin(projectRoot: string): Plugin {
     }
 
     job.status = "queued";
-    job.message = "排隊執行後續處理";
+    job.message = "上傳完成。請按「開始計算」產生樹身分。";
+    pushLog(job, job.message);
     await persistJob(job);
     sendJson(res, 200, { job });
-
-    void runPipeline(job);
   }
 
   async function handleList(_req: IncomingMessage, res: ServerResponse) {
@@ -363,9 +418,18 @@ export function importApiPlugin(projectRoot: string): Plugin {
     sendJson(res, 200, { job });
   }
 
-  async function handleRerun(req: IncomingMessage, res: ServerResponse, id: string) {
+  async function handleCompute(req: IncomingMessage, res: ServerResponse, id: string) {
     await readBody(req);
-    const job = jobs.get(id);
+    const job = jobs.get(id) ?? (await (async () => {
+      try {
+        const raw = await fsp.readFile(path.join(inboxRoot, id, "job.json"), "utf8");
+        const loaded = JSON.parse(raw) as ImportJob;
+        jobs.set(id, loaded);
+        return loaded;
+      } catch {
+        return null;
+      }
+    })());
     if (!job) {
       sendJson(res, 404, { error: "找不到工作" });
       return;
@@ -377,11 +441,71 @@ export function importApiPlugin(projectRoot: string): Plugin {
     setStage(job, "measure", "pending");
     setStage(job, "publish", "pending");
     job.status = "queued";
-    job.message = "重新排隊";
-    pushLog(job, "手動重跑後續處理");
+    job.message = "開始計算樹身分";
+    pushLog(job, "使用者按下開始計算");
     await persistJob(job);
     sendJson(res, 200, { job });
     void runPipeline(job);
+  }
+
+  async function handleInventories(_req: IncomingMessage, res: ServerResponse) {
+    const bindings = await loadBindings();
+    const reports: Record<string, unknown> = {};
+    const scanIds = new Set<string>(Object.values(bindings));
+    const scanRoot = path.join(projectRoot, "public", "scans");
+    try {
+      for (const name of await fsp.readdir(scanRoot)) {
+        if (name.startsWith("_")) continue;
+        scanIds.add(name);
+      }
+    } catch {
+      /* none */
+    }
+    for (const scanId of scanIds) {
+      const report = await loadInventory(scanId);
+      if (report) reports[scanId] = report;
+    }
+    sendJson(res, 200, { bindings, reports });
+  }
+
+  async function handleInventory(_req: IncomingMessage, res: ServerResponse, scanId: string) {
+    const report = await loadInventory(scanId);
+    if (!report) {
+      sendJson(res, 404, { error: "尚無樹身分" });
+      return;
+    }
+    sendJson(res, 200, { report });
+  }
+
+  async function handleScanAsset(_req: IncomingMessage, res: ServerResponse, url: string) {
+    const rel = decodeURIComponent(url.replace(/^\/scans\//, "")).replace(/\?.*$/, "");
+    const scansRoot = path.resolve(projectRoot, "public", "scans");
+    const abs = path.resolve(scansRoot, rel);
+    if (abs !== scansRoot && !abs.startsWith(scansRoot + path.sep)) {
+      res.statusCode = 403;
+      res.end("forbidden");
+      return;
+    }
+    try {
+      const data = await fsp.readFile(abs);
+      const ext = path.extname(abs).toLowerCase();
+      const types: Record<string, string> = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".json": "application/json; charset=utf-8",
+        ".ply": "application/octet-stream",
+      };
+      res.statusCode = 200;
+      res.setHeader("Content-Type", types[ext] || "application/octet-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.end(data);
+    } catch {
+      res.statusCode = 404;
+      res.end("not found");
+    }
   }
 
   return {
@@ -389,9 +513,24 @@ export function importApiPlugin(projectRoot: string): Plugin {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url?.split("?")[0] ?? "";
-        if (!url.startsWith("/api/import")) return next();
+        if (req.method === "GET" && url.startsWith("/scans/")) {
+          await handleScanAsset(req, res, url);
+          return;
+        }
+        if (!url.startsWith("/api/import") && !url.startsWith("/api/inventories")) {
+          return next();
+        }
 
         try {
+          if (req.method === "GET" && url === "/api/inventories") {
+            await handleInventories(req, res);
+            return;
+          }
+          const oneInv = /^\/api\/inventories\/([^/]+)$/.exec(url);
+          if (req.method === "GET" && oneInv) {
+            await handleInventory(req, res, decodeURIComponent(oneInv[1]));
+            return;
+          }
           if (req.method === "GET" && url === "/api/import/jobs") {
             await handleList(req, res);
             return;
@@ -401,9 +540,14 @@ export function importApiPlugin(projectRoot: string): Plugin {
             await handleGet(req, res, decodeURIComponent(one[1]));
             return;
           }
+          const compute = /^\/api\/import\/jobs\/([^/]+)\/compute$/.exec(url);
+          if (req.method === "POST" && compute) {
+            await handleCompute(req, res, decodeURIComponent(compute[1]));
+            return;
+          }
           const rerun = /^\/api\/import\/jobs\/([^/]+)\/rerun$/.exec(url);
           if (req.method === "POST" && rerun) {
-            await handleRerun(req, res, decodeURIComponent(rerun[1]));
+            await handleCompute(req, res, decodeURIComponent(rerun[1]));
             return;
           }
           if (req.method === "POST" && url === "/api/import/jobs") {

@@ -29,6 +29,20 @@ export const SCAN_BINDINGS: ScanBinding[] = [
       [24.17925, 120.6484],
     ],
   },
+  {
+    parkName: "逢甲大學",
+    pathId: "fengchia-campus-20260818",
+    pathName: "校園掃描路徑（8/18）",
+    scanId: "20260818092855",
+    polyline: [
+      [24.17935, 120.64842],
+      [24.17935, 120.64854],
+      [24.17935, 120.64866],
+      [24.17935, 120.64878],
+      [24.17935, 120.64890],
+      [24.17935, 120.64899],
+    ],
+  },
 ];
 
 export function bindingsForPark(parkName: string): ScanBinding[] {

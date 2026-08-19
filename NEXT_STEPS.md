@@ -20,7 +20,7 @@
 10. 量測分頁：現場手測（localStorage，不覆蓋演算法）、待複核清單、匯出 CSV
 11. **3D 點雲**（Three.js）：自動直立、只能繞鉛直軸轉、可重置視角
 12. 地圖沿路徑標各棵樹（無 GPS 時用 `Local_XYZ_m` 插值）
-13. 匯入四格：去噪 PLY、高斯濺射 PLY、原始／去程照片、回程選填；進度中文
+13. 匯入三格：去噪 PLY、高斯濺射 PLY、單趟照片；進度中文
 
 ### 目前已接上的實測掃描
 
@@ -48,7 +48,7 @@ RayStudio 一趟專案（`.bag`）不要直接當照片丟。先匯出去噪 PLY
 ### App 匯入（收檔）
 
 1. 本機 `npm run dev`，點路徑旁「匯入」
-2. 上傳：去噪 `.ply`、高斯濺射 `.ply`、照片資料夾（回程可空）
+2. 上傳：去噪 `.ply`、高斯濺射 `.ply`、這一趟的照片資料夾
 3. 檔案進 `inbox/{jobId}/`；若未設管線，會複製到 `public/scans/{scanId}/_inbox_staged/`
 
 ### 步驟 A — 放入掃描報告（樹表真正出現的條件）
@@ -135,7 +135,7 @@ npm run dev
 | `src/lib/loadPly.ts` | 讀 binary／ascii PLY |
 | `src/components/PlyViewer.tsx` | 3D 點雲（直立、繞鉛直軸） |
 | `src/pages/PathInventoryDialog.tsx` | 盤點視窗 |
-| `src/pages/PathImportDialog.tsx` | 匯入四格 |
+| `src/pages/PathImportDialog.tsx` | 匯入三格 |
 | `src/hooks/usePathRecorder.ts` | GPS 錄製（起測門檻 10 m） |
 | `src/hooks/useFieldMeasures.ts` | 現場手測（localStorage） |
 | `src/lib/csv.ts` | 匯出 CSV |

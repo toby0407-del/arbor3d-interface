@@ -28,7 +28,36 @@ function interpolate(
   return polyline[polyline.length - 1];
 }
 
-/** 沒有樹上 GPS 時，依 Local_XYZ 沿著路徑折線放點。 */
+function offsetFromPath(
+  polyline: LatLng[],
+  cum: number[],
+  total: number,
+  t: number,
+  lateralM: number,
+): LatLng {
+  const onPath = interpolate(polyline, cum, total, t);
+  if (!Number.isFinite(lateralM) || Math.abs(lateralM) < 0.05) return onPath;
+  const dist = Math.min(1, Math.max(0, t)) * total;
+  let i = 1;
+  for (; i < polyline.length; i += 1) {
+    if (cum[i] >= dist || i === polyline.length - 1) break;
+  }
+  const a = polyline[i - 1];
+  const b = polyline[i];
+  const midLat = (a[0] + b[0]) / 2;
+  const dNorth = (b[0] - a[0]) * 111_320;
+  const dEast = (b[1] - a[1]) * 111_320 * Math.cos((midLat * Math.PI) / 180);
+  const len = Math.hypot(dEast, dNorth) || 1;
+  const nEast = -dNorth / len;
+  const nNorth = dEast / len;
+  return [
+    onPath[0] + (nNorth * lateralM) / 111_320,
+    onPath[1] +
+      (nEast * lateralM) / (111_320 * Math.cos((onPath[0] * Math.PI) / 180)),
+  ];
+}
+
+/** 沒有樹上 GPS 時，依 Local_XYZ 沿著路徑折線放點，X 為路旁偏移。 */
 export function treesAlongPolyline(
   polyline: LatLng[],
   trees: TreeRecord[],
@@ -79,7 +108,7 @@ export function treesAlongPolyline(
     const t = (tree.Local_XYZ_m[1] - minY) / span;
     return {
       id: tree.Tree_ID,
-      latlng: interpolate(polyline, cum, total, t),
+      latlng: offsetFromPath(polyline, cum, total, t, tree.Local_XYZ_m[0]),
       light: trafficLight(tree.DBH_note),
     };
   });

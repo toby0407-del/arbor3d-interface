@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { PlyViewer } from "../components/PlyViewer";
 import { useFieldMeasures } from "../hooks/useFieldMeasures";
+import {
+  CARBON_COEFFS,
+  carbonForTree,
+  totalCo2Ton,
+} from "../lib/carbon";
 import { downloadInventoryCsv } from "../lib/csv";
 import {
   breastHeightLabel,
@@ -24,6 +29,7 @@ import type { ParkInventoryReport, TrafficLight } from "../types";
 
 type PreviewTab = "images" | "measure" | "model";
 type Filter = "all" | TrafficLight | "review";
+type TableView = "inventory" | "carbon";
 
 type Props = {
   parkName: string;
@@ -74,9 +80,14 @@ export function PathInventoryDialog({
     null,
   );
   const [tab, setTab] = useState<PreviewTab>("images");
+  const [tableView, setTableView] = useState<TableView>("inventory");
   const [filter, setFilter] = useState<Filter>("all");
   const { measures, update } = useFieldMeasures(report.scan_id);
   const stats = useMemo(() => inventoryStats(report.trees), [report.trees]);
+  const co2Total = useMemo(
+    () => totalCo2Ton(report.trees, measures, report.created_at),
+    [measures, report.created_at, report.trees],
+  );
   const visible = useMemo(() => {
     return report.trees.filter((tree) => {
       if (filter === "all") return true;
@@ -122,12 +133,20 @@ export function PathInventoryDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [lightbox, onClose, onPreviewTree, preview, visible]);
 
-  const pathMapUrl = `/scans/${report.scan_id}/maps/tree_id_map_dbh.png`;
-  const maskUrl = preview ? scanAssetUrl(report.scan_id, preview.Mask_Path) : null;
-  const sliceUrl = preview
-    ? scanAssetUrl(report.scan_id, preview.Cross_Section_Image)
+  const cacheBust = `?t=${encodeURIComponent(report.created_at)}`;
+  const pathMapUrl = `/scans/${report.scan_id}/maps/tree_id_map_dbh.png${cacheBust}`;
+  const maskUrl = preview
+    ? scanAssetUrl(report.scan_id, preview.Mask_Path, cacheBust)
     : null;
-  const photoUrl = preview ? scanAssetUrl(report.scan_id, preview.Best_Photo) : null;
+  const sliceUrl = preview
+    ? scanAssetUrl(report.scan_id, preview.Cross_Section_Image, cacheBust)
+    : null;
+  const photoUrl = preview
+    ? scanAssetUrl(report.scan_id, preview.Best_Photo, cacheBust)
+    : null;
+  const cloudPreviewUrl = preview
+    ? scanAssetUrl(report.scan_id, preview.PointCloud_Preview, cacheBust)
+    : null;
   const modelUrl = preview
     ? scanAssetUrl(
         report.scan_id,
@@ -136,6 +155,9 @@ export function PathInventoryDialog({
     : null;
   const field = preview ? measures[preview.Tree_ID] : undefined;
   const light = preview ? trafficLight(preview.DBH_note) : "red";
+  const carbon = preview
+    ? carbonForTree(preview, field, report.created_at)
+    : null;
 
   return (
     <div className="path-db-backdrop" role="presentation" onClick={onClose}>
@@ -162,6 +184,9 @@ export function PathInventoryDialog({
               <span className="pill">
                 平均信心 {formatConfidence(stats.avgConfidence)}
               </span>
+              <span className="pill is-green">
+                吸收 CO₂ {co2Total.toFixed(2)} ton
+              </span>
             </div>
           </div>
           <div className="path-db-head-actions">
@@ -173,6 +198,7 @@ export function PathInventoryDialog({
                   report.trees,
                   measures,
                   `${report.scan_id}-inventory.csv`,
+                  report.created_at,
                 )
               }
             >
@@ -200,7 +226,7 @@ export function PathInventoryDialog({
                 setLightbox({ src: pathMapUrl, title: `${pathName} · 路徑圖` })
               }
             />
-            <p>樹上編號對應中間表樹號</p>
+            <p>點位顏色對應燈號，樹號看中間表</p>
             {stats.review > 0 ? (
               <section className="review-mini">
                 <h3>待複核 {stats.review}</h3>
@@ -225,7 +251,9 @@ export function PathInventoryDialog({
             ) : null}
           </aside>
 
-          <div className="path-db-table-wrap">
+          <div
+            className={`path-db-table-wrap${tableView === "carbon" ? " is-scroll-x" : ""}`}
+          >
             <div className="inv-filters" role="tablist" aria-label="篩選">
               {(
                 [
@@ -247,9 +275,97 @@ export function PathInventoryDialog({
                   {label}
                 </button>
               ))}
+              <span className="inv-view-split" />
+              {(
+                [
+                  ["inventory", "樹表"],
+                  ["carbon", "碳吸收"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`kind-tab ${tableView === id ? "is-active" : ""}`}
+                  onClick={() => {
+                    setTableView(id);
+                    if (id === "carbon") setTab("measure");
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
             {visible.length === 0 ? (
               <div className="path-db-empty">這個篩選沒有樹</div>
+            ) : tableView === "carbon" ? (
+              <table className="path-db-table is-dense is-carbon">
+                <thead>
+                  <tr>
+                    <th>樹號</th>
+                    <th>
+                      高度 1.3 m 處圓周 (m)<sup>A</sup>
+                    </th>
+                    <th>
+                      樹高 (m)<sup>B</sup>
+                    </th>
+                    <th>
+                      係數<sup>C</sup>
+                    </th>
+                    <th>
+                      樹含碳量 [A²×B×C]<sup>D</sup>
+                    </th>
+                    <th>
+                      吸收 CO₂ 當量 [D×3.667] (ton)
+                    </th>
+                    <th>測量日期</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((tree) => {
+                    const row = carbonForTree(
+                      tree,
+                      measures[tree.Tree_ID],
+                      report.created_at,
+                    );
+                    const active = tree.Tree_ID === preview?.Tree_ID;
+                    return (
+                      <tr
+                        key={tree.Tree_ID}
+                        className={active ? "is-active" : undefined}
+                        onClick={() => onPreviewTree(tree.Tree_ID)}
+                      >
+                        <td>
+                          <code>{tree.Tree_ID}</code>
+                        </td>
+                        <td>{row.circumferenceM?.toFixed(3) ?? "—"}</td>
+                        <td>{row.heightM?.toFixed(1) ?? "—"}</td>
+                        <td>{row.coeff}</td>
+                        <td>{row.carbonD?.toFixed(4) ?? "—"}</td>
+                        <td>{row.co2Ton?.toFixed(3) ?? "—"}</td>
+                        <td>{row.measuredAt}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={5}>本篩選合計</td>
+                    <td>
+                      {visible
+                        .reduce((sum, tree) => {
+                          const row = carbonForTree(
+                            tree,
+                            measures[tree.Tree_ID],
+                            report.created_at,
+                          );
+                          return sum + (row.co2Ton ?? 0);
+                        }, 0)
+                        .toFixed(3)}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
             ) : (
               <table className="path-db-table is-dense">
                 <thead>
@@ -369,7 +485,23 @@ export function PathInventoryDialog({
                     }
                   />
                 ) : (
-                  <div className="path-db-empty">尚無原圖</div>
+                  <div className="path-db-empty">尚無現場原圖</div>
+                )}
+                <h3>點雲側視</h3>
+                {cloudPreviewUrl ? (
+                  <ZoomImage
+                    src={cloudPreviewUrl}
+                    title="點雲側視"
+                    alt={`${preview.Tree_ID} 點雲側視`}
+                    onOpen={() =>
+                      setLightbox({
+                        src: cloudPreviewUrl,
+                        title: `${preview.Tree_ID} · 點雲側視`,
+                      })
+                    }
+                  />
+                ) : (
+                  <div className="path-db-empty">尚無點雲側視</div>
                 )}
               </>
             ) : tab === "measure" ? (
@@ -393,7 +525,7 @@ export function PathInventoryDialog({
                     <dt>弧度覆蓋</dt>
                     <dd>{formatArc(preview.arc_coverage_deg)}</dd>
                   </div>
-                  <div>
+                  <div className={`is-breast ${preview.dbh_is_strict_breast_height ? "is-ok" : ""}`}>
                     <dt>胸高</dt>
                     <dd>{breastHeightLabel(preview.dbh_is_strict_breast_height)}</dd>
                   </div>
@@ -430,6 +562,115 @@ export function PathInventoryDialog({
                     }
                   />
                 </label>
+                {carbon ? (
+                  <div className="carbon-box">
+                    <h3>碳吸收</h3>
+                    <p className="carbon-formula">
+                      D = A² × B × C　·　CO₂ = D × 3.667
+                    </p>
+                    <dl className="spec-list is-carbon">
+                      <div>
+                        <dt>高度 1.3 m 處圓周 A</dt>
+                        <dd>
+                          {carbon.circumferenceM != null
+                            ? `${carbon.circumferenceM.toFixed(3)} m`
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>樹含碳量 D</dt>
+                        <dd>
+                          {carbon.carbonD != null
+                            ? carbon.carbonD.toFixed(4)
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>吸收 CO₂ 當量</dt>
+                        <dd>
+                          {carbon.co2Ton != null
+                            ? `${carbon.co2Ton.toFixed(3)} ton`
+                            : "—"}
+                        </dd>
+                      </div>
+                    </dl>
+                    <label className="field-measure">
+                      <span className="field-label">
+                        樹高 B
+                        <em>公尺，空白則用胸徑粗估</em>
+                      </span>
+                      <input
+                        inputMode="decimal"
+                        value={field?.heightM ?? ""}
+                        placeholder={
+                          carbon.heightM != null
+                            ? `${carbon.heightM.toFixed(1)}（估）`
+                            : "m"
+                        }
+                        onChange={(event) =>
+                          update(preview.Tree_ID, {
+                            heightM: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="field-measure">
+                      <span className="field-label">係數 C</span>
+                      <select
+                        value={
+                          !field?.coeff || field.coeff === "0.027"
+                            ? "0.027"
+                            : field.coeff === "0.02" || field.coeff === "0.020"
+                              ? "0.02"
+                              : "custom"
+                        }
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          update(preview.Tree_ID, {
+                            coeff: value === "custom" ? "0.025" : value,
+                          });
+                        }}
+                      >
+                        {CARBON_COEFFS.map((item) => (
+                          <option key={item.id} value={String(item.value)}>
+                            {item.label}
+                          </option>
+                        ))}
+                        <option value="custom">自訂</option>
+                      </select>
+                    </label>
+                    {field?.coeff &&
+                    field.coeff !== "0.027" &&
+                    field.coeff !== "0.02" &&
+                    field.coeff !== "0.020" ? (
+                      <label className="field-measure">
+                        <span className="field-label">自訂係數</span>
+                        <input
+                          inputMode="decimal"
+                          value={field.coeff}
+                          placeholder="例如 0.025"
+                          onChange={(event) =>
+                            update(preview.Tree_ID, {
+                              coeff: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    ) : null}
+                    <label className="field-measure">
+                      <span className="field-label">測量日期</span>
+                      <input
+                        value={field?.measuredAt ?? ""}
+                        placeholder={carbon.measuredAt}
+                        onChange={(event) =>
+                          update(preview.Tree_ID, {
+                            measuredAt: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <PlyViewer

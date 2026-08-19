@@ -195,6 +195,7 @@ function toSite(item: CatalogItem): ParkSite {
           };
         })
       : [emptyPath(item.id)];
+  paths.sort((a, b) => Number(a.hasInventory) - Number(b.hasInventory));
 
   return {
     id: item.id,
