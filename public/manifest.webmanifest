@@ -1,0 +1,17 @@
+{
+  "name": "Arbor3D 公園樹木盤點",
+  "short_name": "Arbor3D",
+  "display": "standalone",
+  "orientation": "landscape",
+  "start_url": "/",
+  "background_color": "#efe8d8",
+  "theme_color": "#2f4635",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

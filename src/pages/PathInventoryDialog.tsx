@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PathTreeMap } from "../components/PathTreeMap";
 import { PlyViewer } from "../components/PlyViewer";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useModalTouchScrollLock } from "../hooks/useModalTouchScrollLock";
 import { useFieldMeasures } from "../hooks/useFieldMeasures";
 import {
   CARBON_COEFFS,
@@ -23,7 +25,6 @@ import { scanAssetUrl } from "../lib/scanMedia";
 import {
   inventoryStats,
   isReviewTree,
-  lightShort,
   reviewReason,
   trafficLight,
 } from "../lib/status";
@@ -31,7 +32,56 @@ import type { ParkInventoryReport, TrafficLight } from "../types";
 
 type PreviewTab = "images" | "measure" | "model";
 type Filter = "all" | TrafficLight | "review";
-type TableView = "inventory" | "carbon";
+function FormulaPopup({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="formula-popup-backdrop" onClick={onClose}>
+      <div
+        className="formula-popup"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header>
+          <strong>碳吸收公式</strong>
+          <button type="button" className="ghost-btn" onClick={onClose}>
+            ✕
+          </button>
+        </header>
+        <table className="formula-table">
+          <tbody>
+            <tr>
+              <td><strong>A</strong></td>
+              <td>高度 1.3 m 處圓周（m）</td>
+              <td><code>π × 胸徑(m)</code></td>
+            </tr>
+            <tr>
+              <td><strong>B</strong></td>
+              <td>樹高（m）</td>
+              <td>實測 or 粗估 <code>1.3 + 1.8√DBH</code></td>
+            </tr>
+            <tr>
+              <td><strong>C</strong></td>
+              <td>係數</td>
+              <td>預設 <code>0.0159</code>（表定）</td>
+            </tr>
+            <tr>
+              <td><strong>D</strong></td>
+              <td>樹含碳量</td>
+              <td><code>A² × B × C</code></td>
+            </tr>
+            <tr>
+              <td><strong>CO₂</strong></td>
+              <td>吸收 CO₂ 當量（ton）</td>
+              <td><code>D × 3.667</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="formula-note">
+          係數 C 可選：表定 0.0159 ／闊葉 0.027 ／針葉 0.020 ／自訂。<br />
+          3.667 = CO₂ 與 C 的分子量比（44÷12）。
+        </p>
+      </div>
+    </div>
+  );
+}
 
 type Props = {
   parkName: string;
@@ -78,11 +128,14 @@ export function PathInventoryDialog({
   onClose,
   onImport,
 }: Props) {
+  useBodyScrollLock();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useModalTouchScrollLock(panelRef);
   const [lightbox, setLightbox] = useState<{ src: string; title: string } | null>(
     null,
   );
+  const [showFormula, setShowFormula] = useState(false);
   const [tab, setTab] = useState<PreviewTab>("images");
-  const [tableView, setTableView] = useState<TableView>("inventory");
   const [filter, setFilter] = useState<Filter>("all");
   const { measures, update } = useFieldMeasures(report.scan_id);
   const stats = useMemo(() => inventoryStats(report.trees), [report.trees]);
@@ -167,21 +220,19 @@ export function PathInventoryDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="path-db-title"
+        ref={panelRef}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="path-db-head">
           <div>
             <p className="path-db-kicker">{parkName}</p>
             <h2 id="path-db-title">{pathName}</h2>
-            <p>
-              掃描 {report.scan_id} · {formatScanTime(report.created_at)} ·{" "}
-              {report.gps_available ? "有 GPS" : "無 GPS"} · 方向鍵可切樹
-            </p>
+            <p>{formatScanTime(report.created_at)}</p>
             <div className="inv-summary" aria-label="盤點摘要">
               <span className="pill">{stats.total} 棵</span>
-              <span className="pill is-green">淡綠 {stats.green}</span>
-              <span className="pill is-yellow">淡黃 {stats.yellow}</span>
-              <span className="pill is-red">淡紅 {stats.red}</span>
+              <span className="pill is-green">完美 {stats.green}</span>
+              <span className="pill is-yellow">待確認 {stats.yellow}</span>
+              <span className="pill is-red">需複核 {stats.red}</span>
               <span className="pill">
                 平均信心 {formatConfidence(stats.avgConfidence)}
               </span>
@@ -191,6 +242,15 @@ export function PathInventoryDialog({
             </div>
           </div>
           <div className="path-db-head-actions">
+            <button
+              type="button"
+              className="formula-btn"
+              title="碳吸收公式說明"
+              aria-label="碳吸收公式說明"
+              onClick={() => setShowFormula(true)}
+            >
+              ?
+            </button>
             <button
               type="button"
               className="ghost-btn"
@@ -222,9 +282,7 @@ export function PathInventoryDialog({
             <PathTreeMap
               trees={report.trees}
               selectedId={preview?.Tree_ID ?? null}
-              onPick={onPreviewTree}
             />
-            <p>點中間資料列，左邊對應樹會亮燈；也可直接點路徑圖上的點</p>
             {stats.review > 0 ? (
               <section className="review-mini">
                 <h3>待複核 {stats.review}</h3>
@@ -250,15 +308,15 @@ export function PathInventoryDialog({
           </aside>
 
           <div
-            className={`path-db-table-wrap${tableView === "carbon" ? " is-scroll-x" : ""}`}
+            className="path-db-table-wrap"
           >
             <div className="inv-filters" role="tablist" aria-label="篩選">
               {(
                 [
                   ["all", `全部 ${stats.total}`],
-                  ["green", `淡綠 ${stats.green}`],
-                  ["yellow", `淡黃 ${stats.yellow}`],
-                  ["red", `淡紅 ${stats.red}`],
+                  ["green", `完美 ${stats.green}`],
+                  ["yellow", `待確認 ${stats.yellow}`],
+                  ["red", `需複核 ${stats.red}`],
                   ["review", `待複核 ${stats.review}`],
                 ] as const
               ).map(([id, label]) => (
@@ -273,145 +331,68 @@ export function PathInventoryDialog({
                   {label}
                 </button>
               ))}
-              <span className="inv-view-split" />
-              {(
-                [
-                  ["inventory", "樹表"],
-                  ["carbon", "碳吸收"],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`kind-tab ${tableView === id ? "is-active" : ""}`}
-                  onClick={() => {
-                    setTableView(id);
-                    if (id === "carbon") setTab("measure");
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
             </div>
             {visible.length === 0 ? (
               <div className="path-db-empty">這個篩選沒有樹</div>
-            ) : tableView === "carbon" ? (
-              <table className="path-db-table is-dense is-carbon">
-                <thead>
-                  <tr>
-                    <th>樹號</th>
-                    <th>
-                      高度 1.3 m 處圓周 (m)<sup>A</sup>
-                    </th>
-                    <th>
-                      樹高 (m)<sup>B</sup>
-                    </th>
-                    <th>
-                      係數<sup>C</sup>
-                    </th>
-                    <th>
-                      樹含碳量 [A²×B×C]<sup>D</sup>
-                    </th>
-                    <th>
-                      吸收 CO₂ 當量 [D×3.667] (ton)
-                    </th>
-                    <th>測量日期</th>
-                    <th>備註</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((tree) => {
-                    const row = carbonForTree(
-                      tree,
-                      measures[tree.Tree_ID],
-                      report.created_at,
-                    );
-                    const active = tree.Tree_ID === preview?.Tree_ID;
-                    return (
-                      <tr
-                        key={tree.Tree_ID}
-                        className={active ? "is-active" : undefined}
-                        onClick={() => onPreviewTree(tree.Tree_ID)}
-                      >
-                        <td>
-                          <code>{tree.Tree_ID}</code>
-                        </td>
-                        <td>{row.circumferenceM?.toFixed(3) ?? "—"}</td>
-                        <td>
-                          {row.heightM != null
-                            ? row.heightEstimated && row.heightErrorM != null
-                              ? `${row.heightM.toFixed(1)} ±${row.heightErrorM.toFixed(0)}`
-                              : row.heightM.toFixed(1)
-                            : "—"}
-                        </td>
-                        <td>{row.coeff}</td>
-                        <td>{row.carbonD?.toFixed(4) ?? "—"}</td>
-                        <td>{row.co2Ton?.toFixed(3) ?? "—"}</td>
-                        <td>{row.measuredAt}</td>
-                        <td>{measures[tree.Tree_ID]?.note?.trim() || "—"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={5}>本篩選合計</td>
-                    <td>
-                      {visible
-                        .reduce((sum, tree) => {
-                          const row = carbonForTree(
-                            tree,
-                            measures[tree.Tree_ID],
-                            report.created_at,
-                          );
-                          return sum + (row.co2Ton ?? 0);
-                        }, 0)
-                        .toFixed(3)}
-                    </td>
-                    <td colSpan={2} />
-                  </tr>
-                </tfoot>
-              </table>
             ) : (
-              <table className="path-db-table is-dense">
+              <table className="compact-tree-table">
                 <thead>
                   <tr>
                     <th>樹號</th>
                     <th>胸徑</th>
-                    <th>方法</th>
-                    <th>弧度</th>
-                    <th>信心度</th>
-                    <th>狀態</th>
-                    <th>備註</th>
+                    <th>樹高</th>
+                    <th>碳吸收量 CO₂</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visible.map((tree) => {
                     const rowLight = trafficLight(tree.DBH_note);
                     const active = tree.Tree_ID === preview?.Tree_ID;
+                    const row = carbonForTree(
+                      tree,
+                      measures[tree.Tree_ID],
+                      report.created_at,
+                    );
                     return (
                       <tr
                         key={tree.Tree_ID}
-                        className={active ? "is-active" : undefined}
+                        className={`is-${rowLight}${active ? " is-active" : ""}`}
                         onClick={() => onPreviewTree(tree.Tree_ID)}
                       >
-                        <td>
-                          <code>{tree.Tree_ID}</code>
-                        </td>
+                        <td className="mono">{tree.Tree_ID.replace("Tree_", "#")}</td>
                         <td>{formatDbh(tree.DBH_cm)}</td>
-                        <td>{methodLabel(tree.DBH_method)}</td>
-                        <td>{formatArc(tree.arc_coverage_deg)}</td>
-                        <td>{formatConfidence(tree.YOLO_confidence)}</td>
                         <td>
-                          <span className={`path-db-pill is-${rowLight}`}>
-                            {lightShort(rowLight)}
-                          </span>
+                          {row.heightM != null
+                            ? row.heightEstimated
+                              ? `${row.heightM.toFixed(1)} m（估）`
+                              : `${row.heightM.toFixed(1)} m`
+                            : "—"}
                         </td>
-                        <td>{measures[tree.Tree_ID]?.note?.trim() || "—"}</td>
+                        <td>{row.co2Ton != null ? `${row.co2Ton.toFixed(3)} t` : "—"}</td>
                       </tr>
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={3}>合計</td>
+                    <td>
+                      <strong>
+                        {visible
+                          .reduce((sum, tree) => {
+                            const r = carbonForTree(
+                              tree,
+                              measures[tree.Tree_ID],
+                              report.created_at,
+                            );
+                            return sum + (r.co2Ton ?? 0);
+                          }, 0)
+                          .toFixed(3)}{" "}
+                        t
+                      </strong>
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             )}
           </div>
@@ -687,6 +668,8 @@ export function PathInventoryDialog({
           </aside>
         </div>
       </div>
+
+      {showFormula ? <FormulaPopup onClose={() => setShowFormula(false)} /> : null}
 
       {lightbox ? (
         <div

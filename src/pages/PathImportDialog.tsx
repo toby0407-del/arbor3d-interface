@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
+import { useModalTouchScrollLock } from "../hooks/useModalTouchScrollLock";
 import {
   computeImportJob,
   createImportJob,
@@ -240,7 +242,11 @@ export function PathImportDialog({
   onComputed,
   onOpenInventory,
 }: Props) {
+  useBodyScrollLock();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useModalTouchScrollLock(panelRef);
   const [year, setYear] = useState(readLastYear);
+  const [locationName, setLocationName] = useState(pathName);
   const [scanId, setScanId] = useState("");
   const [note, setNote] = useState("");
   const [slots, setSlots] = useState(emptySlots);
@@ -259,6 +265,10 @@ export function PathImportDialog({
   const lastDerived = useRef("");
   const openedReport = useRef("");
   const formatError = validateAll(slots);
+
+  useEffect(() => {
+    setLocationName(pathName);
+  }, [pathName]);
 
   useEffect(() => {
     if (!derivedScanId) return;
@@ -290,6 +300,7 @@ export function PathImportDialog({
 
   const ready =
     !formatError &&
+    locationName.trim().length > 0 &&
     scanId.trim().length > 0 &&
     Number.isFinite(year);
 
@@ -326,7 +337,7 @@ export function PathImportDialog({
         pathId,
         note:
           note.trim() ||
-          `${year} / ${parkName} / ${pathName} / ${folderLabel}`,
+          `${year} / ${parkName} / ${locationName.trim()} / ${folderLabel}`,
         files: {
           denoised: slots.denoised.files,
           gaussian: slots.gaussian.files,
@@ -380,6 +391,7 @@ export function PathImportDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="path-import-title"
+        ref={panelRef}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="path-db-head">
@@ -419,6 +431,15 @@ export function PathImportDialog({
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="login-field">
+                地點名稱
+                <input
+                  value={locationName}
+                  disabled={busy || computing}
+                  placeholder="例如：校園掃描路徑"
+                  onChange={(e) => setLocationName(e.target.value)}
+                />
               </label>
               <label className="login-field">
                 編號 ID
