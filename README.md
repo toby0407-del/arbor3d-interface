@@ -75,17 +75,11 @@ arbor3d-interface/
 │   ├── favicon.svg
 │   ├── icons.svg
 │   └── scans/
-│       ├── 20260812070325/         # 示範掃描媒體
-│       │   ├── photos/             # 原圖
-│       │   ├── masks/              # YOLO Segmentation
-│       │   ├── dbh/                # 胸高橫切面
-│       │   ├── models/             # 單棵樹 PLY
-│       │   └── maps/               # 俯視圖
-│       └── 20260818092855/         # 8/18 實測掃描
-│           ├── dbh/
-│           ├── masks/
-│           ├── maps/
-│           ├── previews/
+│       └── 20260818092855/         # 8/18 逢甲 7-11 實測
+│           ├── dbh/                # 胸高橫切面
+│           ├── masks/              # Segmentation
+│           ├── maps/               # 俯視圖
+│           ├── previews/           # 點雲側視
 │           └── inventory.json
 │
 └── src/
@@ -134,8 +128,7 @@ arbor3d-interface/
         ├── scanBindings.ts         # 掃描 ↔ 公園／路徑綁定
         ├── inventory.ts            # 自動載入 inventories/*.json
         ├── inventories/
-        │   ├── 20260812070325.json # 示範掃描盤點 JSON
-        │   └── 20260818092855.json # 8/18 實測盤點 JSON
+        │   └── 20260818092855.json # 8/18 逢甲 7-11 實測盤點
         ├── staff.ts                # 示範帳號
         └── park_inventory_report.sample.json
 ```
@@ -216,15 +209,17 @@ RayStudio 高斯濺射 → 濺射 .ply ─┤──→ 介面「匯入三格」
 
 ## 八、已接上的實測掃描
 
-| 項目 | 掃描 1 | 掃描 2 |
-|------|--------|--------|
-| 地點 | 逢甲大學 | 逢甲大學 |
-| 路徑 | 校園掃描路徑 | 校園掃描路徑（8/18） |
-| scan_id | `20260812070325` | `20260818092855` |
-| JSON | `src/data/inventories/20260812070325.json` | `src/data/inventories/20260818092855.json` |
-| 媒體 | `public/scans/20260812070325/` | `public/scans/20260818092855/` |
-| 棵數 | 5 棵 | 依 JSON |
-| GPS | 無（用相對座標沿路徑放置） | 依 JSON |
+| 項目 | 內容 |
+|------|------|
+| 地點 | 逢甲大學 · 學思樓／7-11 南側走廊 |
+| 路徑 | 校園掃描路徑（8/18 · 7-11） |
+| scan_id | `20260818092855` |
+| JSON | `src/data/inventories/20260818092855.json` |
+| 媒體 | `public/scans/20260818092855/`（橫切面、Segmentation、點雲側視） |
+| 棵數 | 16 棵 |
+| GPS | 無（用相對座標沿路徑放置） |
+
+本機驗證：登入 → 搜尋「逢甲」→ 點 8/18 路徑 → 樹表、橫切面、點雲側視。高斯濺射整場 PLY 超過 GitHub 100 MB，3D 需本機另放 `public/scans/20260818092855/models/scene_gaussian.ply`。
 
 ---
 

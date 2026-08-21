@@ -18,7 +18,7 @@ export const SCAN_BINDINGS: ScanBinding[] = [
   {
     parkName: "逢甲大學",
     pathId: "fengchia-campus-20260818",
-    pathName: "校園掃描路徑（8/18）",
+    pathName: "校園掃描路徑（8/18 · 7-11）",
     scanId: "20260818092855",
     // 學思樓／育成中心南側走廊（紅線）：兩排建物中間空地，西→東，不到水池
     polyline: [

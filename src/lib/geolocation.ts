@@ -317,8 +317,9 @@ export async function getBestPosition(
     if ((err as GeolocationPositionError)?.code === 1) throw err;
   }
 
-  if (best && isUsableAccuracy(best.coords.accuracy)) {
-    return toResult(best, bestHigh);
+  const lastBest = best as GeolocationPosition | null;
+  if (lastBest && isUsableAccuracy(lastBest.coords.accuracy)) {
+    return toResult(lastBest, bestHigh);
   }
   throw timeoutError();
 }

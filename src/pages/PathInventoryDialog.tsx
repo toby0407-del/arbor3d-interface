@@ -282,6 +282,7 @@ export function PathInventoryDialog({
             <PathTreeMap
               trees={report.trees}
               selectedId={preview?.Tree_ID ?? null}
+              onPick={onPreviewTree}
             />
             {stats.review > 0 ? (
               <section className="review-mini">
@@ -458,22 +459,22 @@ export function PathInventoryDialog({
                 ) : (
                   <div className="path-db-empty">尚無橫切面圖</div>
                 )}
-                <h3>原圖</h3>
                 {photoUrl ? (
-                  <ZoomImage
-                    src={photoUrl}
-                    title="原圖"
-                    alt={`${preview.Tree_ID} 照片`}
-                    onOpen={() =>
-                      setLightbox({
-                        src: photoUrl,
-                        title: `${preview.Tree_ID} · 原圖`,
-                      })
-                    }
-                  />
-                ) : (
-                  <div className="path-db-empty">尚無現場原圖</div>
-                )}
+                  <>
+                    <h3>原圖</h3>
+                    <ZoomImage
+                      src={photoUrl}
+                      title="原圖"
+                      alt={`${preview.Tree_ID} 照片`}
+                      onOpen={() =>
+                        setLightbox({
+                          src: photoUrl,
+                          title: `${preview.Tree_ID} · 原圖`,
+                        })
+                      }
+                    />
+                  </>
+                ) : null}
                 <h3>點雲側視</h3>
                 {cloudPreviewUrl ? (
                   <ZoomImage

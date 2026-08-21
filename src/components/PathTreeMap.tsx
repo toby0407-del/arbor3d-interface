@@ -15,9 +15,10 @@ function shortId(id: string) {
 type Props = {
   trees: TreeRecord[];
   selectedId: string | null;
+  onPick?: (treeId: string) => void;
 };
 
-export function PathTreeMap({ trees, selectedId }: Props) {
+export function PathTreeMap({ trees, selectedId, onPick }: Props) {
   const [zoomed, setZoomed] = useState(false);
   const layout = useMemo(() => {
     if (!trees.length) return null;
@@ -144,12 +145,25 @@ export function PathTreeMap({ trees, selectedId }: Props) {
       {ordered.map((pt) => {
         const on = pt.id === selectedId;
         return (
-          <g
+            <g
             key={pt.id}
             className={`path-tree-map-node is-${pt.light}${on ? " is-on" : ""}`}
             transform={`translate(${pt.x},${pt.y})`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onPick?.(pt.id);
+            }}
+            role={onPick ? "button" : undefined}
+            tabIndex={onPick ? 0 : undefined}
             aria-label={pt.id}
             aria-current={on ? "true" : undefined}
+            onKeyDown={(event) => {
+              if (!onPick) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onPick(pt.id);
+              }
+            }}
           >
             {on ? <circle className="path-tree-map-pulse" r="18" /> : null}
             <circle

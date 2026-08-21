@@ -1026,6 +1026,9 @@ h1 { margin: 0; font-size: 32px; font-weight: 650; letter-spacing: -0.03em; }
   stroke: #1a2216;
   stroke-width: 2;
 }
+.path-tree-map-node {
+  cursor: pointer;
+}
 .path-tree-map-node text {
   font-size: 11px;
   font-weight: 800;

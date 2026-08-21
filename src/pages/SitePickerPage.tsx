@@ -10,6 +10,7 @@ import {
   searchSites,
   siteHasInventory,
   type LatLng,
+  type ParkSite,
   type SiteKind,
 } from "../data/sites";
 import { getReport } from "../data/inventory";

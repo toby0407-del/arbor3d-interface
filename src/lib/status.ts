@@ -12,7 +12,6 @@ export type InventoryStats = {
 export function trafficLight(note: string | null | undefined): TrafficLight {
   const value = note ?? "";
   if (
-    !value ||
     value === "no_measurement" ||
     value.includes("wide_caliper") ||
     value.includes("gap")
