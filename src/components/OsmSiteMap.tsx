@@ -199,7 +199,7 @@ export function OsmSiteMap({
   const haveGoodFixRef = useRef(false);
   const lastAccuracyRef = useRef<number | null>(null);
   const liveFixRef = useRef(false);
-  const [locateNote, setLocateNote] = useState("進入後會先定位，再移到你附近");
+  const [locateNote, setLocateNote] = useState("");
   const [locating, setLocating] = useState(false);
   const [following, setFollowing] = useState(false);
   const [bootLocating, setBootLocating] = useState(() => !readMapView()?.bootDone);
@@ -812,6 +812,7 @@ export function OsmSiteMap({
         <button
           type="button"
           className={basemapMode === "street" ? "is-on" : undefined}
+          aria-pressed={basemapMode === "street"}
           onClick={() => setBasemapMode("street")}
         >
           街道
@@ -819,6 +820,7 @@ export function OsmSiteMap({
         <button
           type="button"
           className={basemapMode === "photo" ? "is-on" : undefined}
+          aria-pressed={basemapMode === "photo"}
           onClick={() => setBasemapMode("photo")}
         >
           空拍
@@ -829,9 +831,10 @@ export function OsmSiteMap({
           type="button"
           className={`osm-locate-btn ${following ? "is-following" : ""}`}
           disabled={recording}
+          aria-label={locating ? "定位中" : following ? "停止追蹤位置" : "定位到目前位置"}
           onClick={onLocateButton}
         >
-          {locating ? "定位中…" : following ? "追蹤中" : "快速定位"}
+          {locating ? "定位中…" : following ? "追蹤中" : "定位"}
         </button>
         {locateNote ? <div className="osm-locate-note">{locateNote}</div> : null}
       </div>

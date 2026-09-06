@@ -271,6 +271,16 @@ export function PathImportDialog({
   }, [pathName]);
 
   useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy && job?.status !== "running") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, job?.status, onClose]);
+
+  useEffect(() => {
     if (!derivedScanId) return;
     setScanId((prev) =>
       !prev || prev === lastDerived.current ? derivedScanId : prev,
@@ -510,9 +520,15 @@ export function PathImportDialog({
               })}
             </div>
 
-            {error ? <p className="login-error">{error}</p> : null}
+            {error ? (
+              <p className="login-error" role="alert">
+                {error}
+              </p>
+            ) : null}
             {!error && formatError ? (
-              <p className="login-error">{formatError}</p>
+              <p className="login-error" role="status">
+                {formatError}
+              </p>
             ) : null}
 
             <button

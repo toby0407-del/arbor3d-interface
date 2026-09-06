@@ -15,8 +15,12 @@ export function LoginPage({ onLogin }: Props) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (!password.trim()) {
+      setError("請輸入密碼。");
+      return;
+    }
     const ok = onLogin(workId, password);
-    if (!ok) setError("工作編號或密碼不正確。");
+    if (!ok) setError("密碼不正確，請再試一次。");
   };
 
   return (
@@ -125,6 +129,9 @@ export function LoginPage({ onLogin }: Props) {
               type="password"
               value={password}
               autoComplete="current-password"
+              autoFocus
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? "login-error" : undefined}
               onChange={(event) => {
                 setPassword(event.target.value);
                 setError("");
@@ -132,7 +139,11 @@ export function LoginPage({ onLogin }: Props) {
             />
           </label>
 
-          {error ? <p className="login-error">{error}</p> : null}
+          {error ? (
+            <p className="login-error" id="login-error" role="alert">
+              {error}
+            </p>
+          ) : null}
 
           <div className="login-actions">
             <button type="submit" className="primary-btn login-primary">

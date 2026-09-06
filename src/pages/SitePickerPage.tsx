@@ -70,6 +70,11 @@ export function SitePickerPage({ session, onLogout }: Props) {
   const [overlays, setOverlays] = useState<MapOverlay[]>(() => readOverlays());
   const [liveReports, setLiveReports] = useState<Record<string, ParkInventoryReport>>({});
   const [liveBinds, setLiveBinds] = useState<Record<string, string>>({});
+  const [saveDraft, setSaveDraft] = useState<{
+    label: string;
+    polyline: LatLng[];
+  } | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const recorder = usePathRecorder();
 
   useEffect(() => {
@@ -82,6 +87,15 @@ export function SitePickerPage({ session, onLogout }: Props) {
         /* 本機尚未計算過 */
       });
   }, []);
+
+  useEffect(() => {
+    if (!saveDraft) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") discardDraft();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [saveDraft]);
 
   const filtered = useMemo(() => {
     const rows = searchSites(query, kind).map((site) =>
@@ -160,12 +174,6 @@ export function SitePickerPage({ session, onLogout }: Props) {
       setNotice({ tone: "err", text: "點數不足，未保存。" });
       return;
     }
-    const wantSave = window.confirm("要保存這次錄製並顯示在地圖上嗎？");
-    if (!wantSave) {
-      recorder.reset();
-      setNotice({ tone: "ok", text: "已停止，未保存。" });
-      return;
-    }
     const stamp = new Date().toLocaleTimeString("zh-TW", {
       hour: "2-digit",
       minute: "2-digit",
@@ -173,20 +181,29 @@ export function SitePickerPage({ session, onLogout }: Props) {
     const suggested = park
       ? `${park.name} 現場錄製 ${stamp}`
       : `現場錄製 ${stamp}`;
-    const label =
-      window.prompt("這段路叫什麼？（會顯示在地圖上）", suggested)?.trim() ||
-      suggested;
-    const polyline = toLatLngs(points);
+    setSaveDraft({ label: suggested, polyline: toLatLngs(points) });
+  };
+
+  const discardDraft = () => {
+    setSaveDraft(null);
+    recorder.reset();
+    setNotice({ tone: "ok", text: "已停止，未保存。" });
+  };
+
+  const keepDraft = () => {
+    if (!saveDraft) return;
+    const label = saveDraft.label.trim() || "現場錄製";
     const overlay: MapOverlay = {
       id: `rec-${Date.now().toString(36)}`,
       parkId: parkId ?? "",
       pathId,
       label,
-      polyline,
+      polyline: saveDraft.polyline,
       source: "record",
       createdAt: new Date().toISOString(),
     };
     setOverlays(upsertOverlay(overlay));
+    setSaveDraft(null);
     recorder.reset();
     setNotice({ tone: "ok", text: `已保存「${label}」並畫在地圖上。` });
   };
@@ -253,9 +270,6 @@ export function SitePickerPage({ session, onLogout }: Props) {
             </div>
           </div>
         </div>
-        <p className="picker-hint">
-          公園 {SITE_COUNTS.parks} · 學校 {SITE_COUNTS.schools} · 已盤點路徑可直接查看成果
-        </p>
         <button type="button" className="ghost-btn" onClick={onLogout}>
           登出
         </button>
@@ -263,14 +277,14 @@ export function SitePickerPage({ session, onLogout }: Props) {
 
       <div className="picker-body">
         <aside className="picker-side">
-          <h1>選拍攝地點</h1>
+          <h1>地點</h1>
 
           <label className="search-field">
             搜尋
             <input
               type="search"
               value={query}
-              placeholder="縣市＋名稱可連打，例如：台中惠來、逢甲"
+              placeholder="台中惠來、逢甲"
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
@@ -298,7 +312,7 @@ export function SitePickerPage({ session, onLogout }: Props) {
 
           <p className="search-meta">{filtered.length} 筆</p>
 
-          <h2>地點</h2>
+          <h2 className="sr-only">地點列表</h2>
           <ul className="picker-list is-scroll">
             {filtered.slice(0, 80).map((item) => (
               <li key={item.id}>
@@ -365,15 +379,11 @@ export function SitePickerPage({ session, onLogout }: Props) {
                             <span className="pending-badge">尚未匯入</span>
                           )}
                         </strong>
-                        <span>
-                          {ready
-                            ? `掃描 ${scan} · 點此查看盤點`
-                            : "尚無盤點 · 點此匯入"}
-                        </span>
                       </button>
                       <button
                         type="button"
                         className="ghost-btn"
+                        aria-label={`匯入 ${item.name}`}
                         onClick={() => {
                           setParkId(park.id);
                           setPathId(item.id);
@@ -477,10 +487,31 @@ export function SitePickerPage({ session, onLogout }: Props) {
                       </div>
                       <button
                         type="button"
-                        className="ghost-btn"
-                        onClick={() => setOverlays(removeOverlay(item.id))}
+                        className={`ghost-btn ${pendingRemove === item.id ? "is-danger" : ""}`}
+                        aria-label={
+                          pendingRemove === item.id
+                            ? `確認移除 ${item.label}`
+                            : `移除 ${item.label}`
+                        }
+                        onClick={() => {
+                          if (pendingRemove === item.id) {
+                            setOverlays(removeOverlay(item.id));
+                            setPendingRemove(null);
+                            setNotice({
+                              tone: "ok",
+                              text: `已從地圖移除「${item.label}」。`,
+                            });
+                            return;
+                          }
+                          setPendingRemove(item.id);
+                          window.setTimeout(() => {
+                            setPendingRemove((cur) =>
+                              cur === item.id ? null : cur,
+                            );
+                          }, 4000);
+                        }}
                       >
-                        移除
+                        {pendingRemove === item.id ? "確認移除" : "移除"}
                       </button>
                     </div>
                   </li>
@@ -490,7 +521,11 @@ export function SitePickerPage({ session, onLogout }: Props) {
           ) : null}
 
           {notice ? (
-            <p className={notice.tone === "ok" ? "picker-notice" : "login-error"}>
+            <p
+              className={notice.tone === "ok" ? "picker-notice" : "login-error"}
+              role="status"
+              aria-live="polite"
+            >
               {notice.text}
             </p>
           ) : null}
@@ -549,6 +584,47 @@ export function SitePickerPage({ session, onLogout }: Props) {
             setShowImport(true);
           }}
         />
+      ) : null}
+
+      {saveDraft ? (
+        <div
+          className="save-path-backdrop"
+          role="presentation"
+          onClick={discardDraft}
+        >
+          <div
+            className="save-path-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="save-path-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="save-path-title">保存這次錄製？</h2>
+            <p>路段名稱會顯示在地圖上。</p>
+            <label className="login-field">
+              路段名稱
+              <input
+                autoFocus
+                value={saveDraft.label}
+                onChange={(event) =>
+                  setSaveDraft({ ...saveDraft, label: event.target.value })
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") keepDraft();
+                  if (event.key === "Escape") discardDraft();
+                }}
+              />
+            </label>
+            <div className="save-path-actions">
+              <button type="button" className="ghost-btn" onClick={discardDraft}>
+                不保存
+              </button>
+              <button type="button" className="primary-btn" onClick={keepDraft}>
+                保存到地圖
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
